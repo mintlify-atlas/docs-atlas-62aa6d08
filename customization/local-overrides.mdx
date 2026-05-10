@@ -1,0 +1,245 @@
+---
+title: 'Local Overrides: Customize Without Touching Core Files'
+description: 'Use the local/ directory to override VuFind configuration, templates, and language files so your customizations survive upgrades intact.'
+---
+
+VuFind ships with a `local/` directory that is the designated home for every institutional customization. Rather than editing files inside the VuFind source tree, you copy only the files you need to change into `local/` and modify them there. VuFind's file-resolution logic checks `local/` first and falls back to the core installation, so your overrides take precedence transparently.
+
+As the `local/README.txt` in the VuFind repository states:
+
+> All of your local configurations and customizations belong in this directory and its subdirectories. Rather than modifying core VuFind files, you should copy them here and modify them within the local directory. This will make upgrades easier.
+
+## How the override system works
+
+When VuFind looks up any configuration file, template, or language string, it checks the local directory path before the module or core path. The first matching file wins.
+
+```
+Request for config/vufind/config.ini
+        │
+        ▼
+local/config/vufind/config.ini   ← checked first (your overrides)
+        │ (not found)
+        ▼
+config/vufind/config.ini         ← core file used as fallback
+```
+
+This means you never risk overwriting a file during a `git pull` or a package upgrade, because your customizations live outside the tracked source tree.
+
+## The local/ directory structure
+
+The `local/` directory mirrors the structure of the core VuFind installation for configuration and languages, and mirrors the theme directory for templates:
+
+<Tree>
+  <Tree.Folder name="local/" defaultOpen>
+    <Tree.Folder name="cache/" />
+    <Tree.Folder name="config/" defaultOpen>
+      <Tree.Folder name="vufind/" />
+    </Tree.Folder>
+    <Tree.Folder name="harvest/" />
+    <Tree.File name="DirLocations.ini.dist" />
+    <Tree.File name="README.txt" />
+  </Tree.Folder>
+</Tree>
+
+You may also create `local/languages/` for translation overrides and `local/themes/` if your deployment places custom themes there rather than in the main `themes/` directory.
+
+## Overriding configuration files
+
+<Steps>
+  <Step title="Identify the file to override">
+    All VuFind configuration files live in `config/vufind/`. Find the file that contains the setting you want to change. The main configuration file is `config/vufind/config.ini`.
+  </Step>
+
+  <Step title="Copy it to local/">
+    Copy the file into the matching path under `local/config/vufind/`:
+
+    ```bash
+    cp config/vufind/config.ini local/config/vufind/config.ini
+    ```
+  </Step>
+
+  <Step title="Edit the local copy">
+    Open `local/config/vufind/config.ini` and make your changes. For example, to set the site title and activate your custom theme:
+
+    ```ini local/config/vufind/config.ini
+    [Site]
+    title  = "My University Library"
+    theme  = mytheme
+    url    = https://catalog.myuniversity.edu/vufind
+    email  = library@myuniversity.edu
+    ```
+
+    <Tip>
+    You do not have to keep the entire file. For INI files, VuFind merges your local version on top of the core version section by section, so you can keep only the sections and keys you actually want to change. However, copying the entire file is also safe and makes it easier to see everything at a glance.
+    </Tip>
+  </Step>
+</Steps>
+
+### Commonly overridden configuration files
+
+<AccordionGroup>
+  <Accordion title="config.ini — main site settings">
+    Controls site title, theme, language, ILS connection, authentication, and hundreds of other global settings. The `[Site]` section is the most frequently customized.
+
+    ```ini local/config/vufind/config.ini
+    [Site]
+    title    = "My Library Catalog"
+    theme    = mytheme
+    language = en
+    timezone = "America/Chicago"
+    ```
+  </Accordion>
+  <Accordion title="searches.ini — search behavior">
+    Defines available search handlers, sort options, result limits, and facets for the primary Solr search backend.
+  </Accordion>
+  <Accordion title="facets.ini — facet configuration">
+    Controls which facets appear on search results pages, their labels, and their display order.
+  </Accordion>
+  <Accordion title="RecordTabs.ini — record detail tabs">
+    Configures which tabs (Holdings, Description, Staff View, etc.) appear on individual record pages and in what order.
+  </Accordion>
+  <Accordion title="permissions.ini — access control">
+    Defines role-based access rules for admin pages, debug mode, and other protected features.
+  </Accordion>
+  <Accordion title="ILS drivers — catalog integration">
+    Connection settings for your integrated library system go in a driver-specific config file such as `Horizon.ini`, `Symphony.ini`, or `Folio.ini`.
+  </Accordion>
+</AccordionGroup>
+
+## Overriding templates
+
+Templates control the HTML markup for every page in VuFind. They are `.phtml` files (Laminas/Zend view scripts) located under a theme's `templates/` directory. VuFind resolves templates by walking the active theme's inheritance chain, so you can override a template at either the theme level or at the local level.
+
+<Tabs>
+  <Tab title="Override in your custom theme">
+    The preferred approach: place the modified template inside your theme's `templates/` directory. This keeps overrides scoped to the theme.
+
+    ```bash
+    # Copy the template you want to modify from its source theme
+    cp themes/bootstrap5/templates/search/results.phtml \
+       themes/mytheme/templates/search/results.phtml
+
+    # Edit the copy
+    nano themes/mytheme/templates/search/results.phtml
+    ```
+  </Tab>
+  <Tab title="Override in local/themes/">
+    If you are not maintaining a separate custom theme, you can place overrides in `local/themes/<your-theme-name>/templates/`. VuFind checks the local theme path before the main theme path.
+
+    ```bash
+    mkdir -p local/themes/mytheme/templates/search
+
+    cp themes/bootstrap5/templates/search/results.phtml \
+       local/themes/mytheme/templates/search/results.phtml
+    ```
+  </Tab>
+</Tabs>
+
+The `bootstrap5` theme provides templates for every part of the interface. Key subdirectories include:
+
+| Directory | Contains |
+|-----------|----------|
+| `templates/layout/` | Page frame, header, footer wrappers |
+| `templates/header.phtml` | Top navigation and search bar |
+| `templates/footer.phtml` | Footer content |
+| `templates/search/` | Search home, results, and related pages |
+| `templates/record/` | Individual record detail pages |
+| `templates/myresearch/` | User account pages |
+| `templates/content/` | Static content pages |
+| `templates/Auth/` | Login and registration forms |
+| `templates/RecordTab/` | Individual record tabs (Holdings, Description, etc.) |
+
+<Warning>
+Every overridden template is a snapshot of the original at the time you copied it. When VuFind is upgraded, review your overridden templates against the upstream versions and merge in any bug fixes or new features manually. Minimize the number of overridden templates to reduce this maintenance burden.
+</Warning>
+
+## Overriding language strings
+
+Language files live in `languages/` and use a simple INI `key = "value"` format. To customize displayed text, copy the relevant language file into `local/languages/` and change only the strings you need.
+
+```bash
+mkdir -p local/languages
+cp languages/en.ini local/languages/en.ini
+```
+
+Edit the copy to change specific strings:
+
+```ini local/languages/en.ini
+Add to favorites = "Save to My List"
+title_wrapper   = "%%pageTitle%% — My University Library"
+```
+
+<Note>
+You only need to include the keys you want to override. VuFind merges `local/languages/en.ini` on top of `languages/en.ini`, so any key not present in your local file falls back to the core translation.
+</Note>
+
+See the [Translations](/customization/translations) page for full details on the language system, file format, and adding new languages.
+
+## Best practices for upgrade safety
+
+<Steps>
+  <Step title="Keep local/ outside version control of the core">
+    Do not commit your `local/` changes into the main VuFind Git repository. Instead, maintain a separate Git repository (or subtree) for `local/`, or use a deployment tool that manages it independently.
+  </Step>
+
+  <Step title="Override only what you must">
+    Every file you copy into `local/` or into a custom theme becomes a file you are responsible for maintaining. Where possible, use configuration settings rather than template overrides, because config files are far easier to merge during upgrades.
+  </Step>
+
+  <Step title="Document your changes">
+    Add comments inside your local files explaining why you overrode that particular setting or template block. Future maintainers (and future you) will thank you.
+
+    ```ini local/config/vufind/config.ini
+    [Site]
+    ; Customized 2024-03-15: use institutional branding
+    title = "My University Library"
+    theme = mytheme
+    ```
+  </Step>
+
+  <Step title="Review upstream diffs on upgrade">
+    After upgrading VuFind, diff your local overrides against the new core files to identify anything that needs to be merged:
+
+    ```bash
+    diff config/vufind/searches.ini local/config/vufind/searches.ini
+    ```
+  </Step>
+
+  <Step title="Use the local cache directory">
+    VuFind writes compiled and cached files to `local/cache/`. Never commit this directory; add it to `.gitignore`. Clear it when you change theme or asset pipeline settings:
+
+    ```bash
+    rm -rf local/cache/public/*
+    ```
+  </Step>
+</Steps>
+
+## Example: overriding the search results page title
+
+Here is a complete walkthrough of overriding one specific template to add your institution's name to search result page titles.
+
+<Steps>
+  <Step title="Find the template">
+    The page `<title>` element is managed by the layout template. Locate it:
+
+    ```bash
+    ls themes/bootstrap5/templates/layout/
+    ```
+  </Step>
+
+  <Step title="Copy to your theme">
+    ```bash
+    mkdir -p themes/mytheme/templates/layout
+    cp themes/bootstrap5/templates/layout/layout.phtml \
+       themes/mytheme/templates/layout/layout.phtml
+    ```
+  </Step>
+
+  <Step title="Make a targeted edit">
+    Open the copied template and modify only the specific block you need. Leave the rest of the file unchanged so that future merges are as small as possible.
+  </Step>
+
+  <Step title="Test in your browser">
+    Activate your theme in `local/config/vufind/config.ini` and reload the page to verify the change.
+  </Step>
+</Steps>

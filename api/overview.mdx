@@ -1,0 +1,164 @@
+---
+title: 'VuFind REST API: Overview and Getting Started'
+description: 'Learn how to authenticate, make requests, and handle responses with the VuFind REST API. Covers API keys, Swagger UI, endpoints, and error codes.'
+---
+
+The VuFind REST API exposes library catalog search and record retrieval functionality over HTTP. All responses are returned as JSON, making it straightforward to integrate catalog data into external applications, harvesters, or custom frontends. The API follows [OpenAPI 3](https://spec.openapis.org/oas/v3.0.3) conventions and ships with an interactive Swagger UI for exploration.
+
+## Base URL
+
+All API v1 endpoints are served under `/api/v1/`:
+
+```
+https://your-vufind-instance.example.org/api/v1/
+```
+
+Visiting `/api` or `/api/v1/` without query parameters redirects you to the Swagger UI. To retrieve the raw OpenAPI specification as JSON, append `?openapi` to the URL:
+
+```
+https://your-vufind-instance.example.org/api?openapi
+```
+
+## Authentication
+
+VuFind supports three API key modes, configured in `config.ini` under `[API_Keys]`:
+
+| Mode | Behavior |
+|---|---|
+| `disabled` | API keys are not used. All requests are permitted (subject to permissions). This is the default. |
+| `optional` | Users may create and use API keys, but keys are not required. |
+| `enforced` | Every request must include a valid API key. Requests without a key receive a `401 Unauthorized` response. |
+
+When API keys are enabled or enforced, pass your key in the `X-API-KEY` request header (the header name is configurable via `header_field` in `config.ini`):
+
+```bash
+curl -H "X-API-KEY: your-api-key" \
+  "https://your-vufind-instance.example.org/api/v1/search?lookfor=geology"
+```
+
+<Note>
+  Users can manage their API keys through the VuFind developer settings interface. Administrators control whether keys are optional or enforced, and can set a per-user key limit (default: 5).
+</Note>
+
+## Swagger UI
+
+An interactive Swagger UI is available at:
+
+```
+https://your-vufind-instance.example.org/swagger-ui/?url=...
+```
+
+Visiting `/api` in a browser will redirect you there automatically. The Swagger UI lets you explore all available endpoints, inspect parameters and response schemas, and issue live test requests directly from your browser.
+
+## Available endpoints
+
+<CardGroup cols={2}>
+  <Card title="Search" icon="magnifying-glass" href="/api/search">
+    Search the primary bibliographic index. Supports faceted filtering, sorting, and cursor-based pagination.
+  </Card>
+  <Card title="Records" icon="book-open" href="/api/records">
+    Retrieve one or more bibliographic records by their unique identifiers.
+  </Card>
+  <Card title="Authority" icon="user-check" href="/api/authority">
+    Search and retrieve records from the authority index (persons, corporate bodies, subjects).
+  </Card>
+</CardGroup>
+
+Additional endpoints registered in the API:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /api/v1/search` | GET, POST | Search the primary bibliographic index |
+| `GET /api/v1/record` | GET, POST | Retrieve one or more bibliographic records |
+| `GET /api/v1/index2/search` | GET, POST | Search the secondary index (Search2) |
+| `GET /api/v1/index2/record` | GET, POST | Retrieve records from the secondary index |
+| `GET /api/v1/authority/search` | GET, POST | Search the authority index |
+| `GET /api/v1/authority/record` | GET, POST | Retrieve authority records |
+| `GET /api/v1/web/search` | GET, POST | Search the website index |
+| `GET /api/v1/web/record` | GET, POST | Retrieve website index records |
+| `DELETE /api/v1/admin/cache` | DELETE | Clear application caches (requires admin permission) |
+
+## Response format
+
+All successful responses return JSON with the following top-level envelope:
+
+```json
+{
+  "status": "OK",
+  "resultCount": 42,
+  "records": [ ... ],
+  "facets": { ... }
+}
+```
+
+Error responses use the same envelope with a non-`OK` status and an HTTP error code:
+
+```json
+{
+  "status": "ERROR",
+  "statusMessage": "Missing id"
+}
+```
+
+<ResponseField name="status" type="string" required>
+  `"OK"` on success, `"ERROR"` on failure, or `"UNAUTHORIZED"` when a required API key is absent.
+</ResponseField>
+
+<ResponseField name="statusMessage" type="string">
+  Human-readable description of the error. Present only when `status` is not `"OK"`.
+</ResponseField>
+
+<ResponseField name="resultCount" type="integer">
+  Total number of results matching the query. Present on search and record endpoints.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  Array of record objects. Present when records are returned.
+</ResponseField>
+
+<ResponseField name="facets" type="object">
+  Facet data keyed by facet field name. Present on search responses when facets were requested.
+</ResponseField>
+
+## HTTP status codes
+
+| Code | Meaning |
+|---|---|
+| `200 OK` | Request succeeded. |
+| `204 No Content` | OPTIONS preflight request handled (CORS). |
+| `400 Bad Request` | Invalid parameter (e.g., missing `id`, limit out of range, invalid search syntax, expired resumption token). |
+| `401 Unauthorized` | API key required but not provided. |
+| `403 Forbidden` | The caller does not have the required permission (e.g., `access.api.Search`). |
+| `500 Internal Server Error` | An unexpected server error occurred. |
+
+## CORS
+
+All API responses include `Access-Control-Allow-Origin: *`, allowing cross-origin requests from any domain. The API accepts `GET`, `POST`, and `OPTIONS` methods.
+
+## Output options
+
+Two optional query parameters are available on all endpoints:
+
+<ParamField query="prettyPrint" type="boolean" default="false">
+  When `true`, the JSON response is formatted with indentation for human readability.
+</ParamField>
+
+<ParamField query="callback" type="string">
+  When provided, the response is wrapped as a JSONP callback instead of plain JSON. The value must be the name of the JavaScript function to call.
+</ParamField>
+
+## Access control
+
+API access is governed by VuFind's permission system. The relevant permissions are defined in `permissions.ini`:
+
+| Permission | Controls access to |
+|---|---|
+| `access.api.Search` | `GET /api/v1/search` |
+| `access.api.Record` | `GET /api/v1/record` |
+| `access.api.admin.cache` | `DELETE /api/v1/admin/cache` |
+
+By default, these permissions are open to all users. Administrators can restrict access by IP range or role by uncommenting and editing the example blocks in `permissions.ini`.
+
+<Warning>
+  If you expose VuFind publicly and want to limit API use to trusted clients, enable IP-range restrictions in `permissions.ini` and set `[API_Keys] mode = enforced` in `config.ini`.
+</Warning>

@@ -1,0 +1,73 @@
+---
+title: "VuFind: Architecture, Features, and Community"
+description: "Learn what VuFind is, how its PHP/Laminas MVC and Solr architecture works, and why libraries worldwide use it to replace legacy OPACs."
+---
+
+VuFind® is an open source discovery environment built by libraries, for libraries. It gives patrons a single, modern interface to search across bibliographic catalogs, institutional repositories, and third-party databases — replacing or supplementing traditional OPACs with faceted search, relevancy ranking, and ILS-integrated account management.
+
+## What problem VuFind solves
+
+Traditional integrated library system OPACs expose only one collection at a time and offer limited search capabilities. VuFind centralises multiple sources — local Solr indexes, external search APIs, and digital repositories — under one consistent interface. Patrons can search, filter, place holds, renew loans, and manage saved lists without navigating separate systems.
+
+## Key features
+
+- **Unified search** across Solr, EDS, Primo, Summon, WorldCat, LibGuides, and ProQuest FSG from a single search box
+- **30+ ILS drivers** for Folio, Koha, Sierra, Alma, Voyager, Symphony, and more
+- **Flexible authentication** via LDAP, Shibboleth, CAS, OpenID Connect, ILS-native, and local database
+- **Themeable UI** built on Bootstrap 5 with full local-override support and mobile-responsive layouts
+- **Multi-language** support with 40+ included translations and an extensible i18n system
+- **REST API** exposing search, record, and authority data to external applications
+- **Multi-site** support for running several discovery portals from one installation
+
+## Architecture overview
+
+VuFind is written in PHP 8.2+ and structured as a [Laminas MVC](https://docs.laminas.dev/laminas-mvc/) application composed of several PSR-4 namespaced modules:
+
+| Module | Purpose |
+|---|---|
+| `VuFind` | Core search, record display, and user account logic |
+| `VuFindAdmin` | Administrative interface |
+| `VuFindApi` | REST API endpoints |
+| `VuFindConsole` | CLI commands (indexing, installation, harvesting) |
+| `VuFindSearch` | Backend-agnostic search abstraction layer |
+| `VuFindTheme` | Theme management and asset pipeline |
+
+**Search layer.** The `VuFindSearch` library provides a uniform interface over all supported backends. When a patron submits a query, VuFind translates it to the backend's native query language (Solr query syntax, EDS API calls, etc.) and normalises the response into a common record model.
+
+**Solr.** The primary search backend is Apache Solr. VuFind ships with Solr configuration schemas and import scripts based on SolrMarc. MARC 21 records are indexed via `import/import.properties` rules that map MARC fields to Solr fields.
+
+**ILS drivers.** Each supported integrated library system has a driver class that implements a common interface for holdings lookup, patron authentication, and circulation actions. Drivers are configured in `config/vufind/config.ini` under the `[Catalog]` section.
+
+**Local overrides.** VuFind separates core code from local customisations using an override directory (by default `local/`). Configuration files, templates, and language strings placed in the override directory take precedence over their core counterparts, making upgrades safe and straightforward.
+
+## Community and licensing
+
+VuFind is maintained by a global community of libraries, developers, and vendors coordinated through the [vufind-org](https://github.com/vufind-org) GitHub organisation. It is released under the **GNU General Public License version 2** (`GPL-2.0-only`), as declared in `composer.json`.
+
+Community resources include:
+
+- **Wiki**: comprehensive documentation at [vufind.org/wiki](https://vufind.org/wiki)
+- **Downloads**: packaged releases at [vufind.org/vufind/downloads.html](https://vufind.org/vufind/downloads.html)
+- **Support**: community and commercial support options listed at [vufind.org/vufind/support.html](https://vufind.org/vufind/support.html)
+- **Developers handbook**: contribution guide at [vufind.org/wiki/development](https://vufind.org/wiki/development)
+
+<Note>
+  Packaged releases include all Composer dependencies. If you install from a Git checkout, run `composer install` in the VuFind home directory before proceeding.
+</Note>
+
+## Explore the documentation
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get a working VuFind instance running in minutes using the interactive installer.
+  </Card>
+  <Card title="Full installation" icon="download" href="/installation">
+    Step-by-step walkthrough covering system requirements, web server configuration, and first-run verification.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration/overview">
+    Configure search backends, ILS drivers, authentication, and site-wide settings.
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Explore VuFind's REST API for search, record retrieval, and authority data.
+  </Card>
+</CardGroup>

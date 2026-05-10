@@ -1,0 +1,269 @@
+---
+title: 'Harvesting Metadata with OAI-PMH in VuFind'
+description: 'Configure and run VuFind OAI-PMH harvesting, process harvested records with batch scripts, schedule automated jobs, and troubleshoot harvest failures.'
+---
+
+VuFind includes a full OAI-PMH harvesting stack built on the `VuFindHarvest` library. The harvester downloads metadata records from remote repositories, saves them to disk, and a set of batch import scripts then index those records into Solr. This page explains how to configure sources, run the harvester, process harvested files, and set up automated scheduling.
+
+## The harvest/ directory
+
+The `harvest/` directory at the root of the VuFind installation contains all harvesting-related scripts and the default `oai.ini` configuration file.
+
+```
+harvest/
+├── oai.ini                     # OAI-PMH source configuration
+├── harvest_oai.php             # Legacy PHP entry point (wraps the CLI command)
+├── batch-import-marc.sh        # Import .mrc / .xml files after harvest
+├── batch-import-marc-auth.sh   # Import authority MARC files after harvest
+├── batch-import-xsl.sh         # Import files using XSLT transformation
+├── batch-delete.sh             # Process delete lists from a harvest
+├── merge-marc.php              # Merge multiple MARC XML files
+└── *.bat                       # Windows equivalents of the .sh scripts
+```
+
+Harvested records are written to subdirectories under `$VUFIND_LOCAL_DIR/harvest/` (or `$VUFIND_HOME/harvest/` if `VUFIND_LOCAL_DIR` is not set), one subdirectory per configured OAI source.
+
+---
+
+## Configuring OAI-PMH sources
+
+All harvest sources are defined in `oai.ini`. Each source is an INI section whose name becomes the subdirectory into which records are written.
+
+```ini
+; harvest/oai.ini
+
+[MyRepository]
+url             = https://oai.example.edu/oai
+set             = my_collection
+metadataPrefix  = marc21
+timeout         = 60
+combineRecords  = true
+combineRecordsTag = <collection>
+idSearch[]      = "/^oai:example.edu:/"
+idReplace[]     = "myrepo-"
+injectDate      = false
+injectId        = false
+harvestedIdLog  = harvest.log
+verbose         = false
+sanitize        = true
+```
+
+### Core settings
+
+| Key | Default | Description |
+|---|---|---|
+| `url` | _(required)_ | Base URL of the OAI-PMH endpoint |
+| `set` | _(harvest all)_ | `setSpec` value to restrict harvesting to a single set. Repeat with `set[] = x` to harvest multiple sets. |
+| `metadataPrefix` | `oai_dc` | Metadata format to request (e.g. `marc21`, `oai_marc`, `oai_dc`) |
+| `timeout` | `60` | HTTP request timeout in seconds |
+| `dateGranularity` | `auto` | Date format used by the server: `YYYY-MM-DD`, `YYYY-MM-DDThh:mm:ssZ`, or `auto` |
+
+### Record combination
+
+By default the harvester writes one file per OAI record. Set `combineRecords = true` to merge a server's response chunk into a single file. This is required when the downstream XSLT transformation expects a `<collection>` wrapper.
+
+```ini
+combineRecords    = true
+combineRecordsTag = <collection>
+```
+
+### ID manipulation
+
+Use `idSearch[]` and `idReplace[]` pairs (PHP `preg_replace` syntax) to normalise OAI identifiers before they are written to filenames and injected into records.
+
+```ini
+idSearch[]  = "/^oai:example.edu:records\//"
+idReplace[] = "example-"
+idSearch[]  = "/\//"
+idReplace[] = "-"
+```
+
+### Authentication and proxies
+
+```ini
+httpUser   = myUsername
+httpPass   = myPassword
+
+proxy_host = proxy.example.edu
+proxy_port = 8080
+proxy_user = alice
+proxy_pass = proxyPassword
+proxy_auth = Laminas\Http\Client::AUTH_BASIC
+```
+
+### SSL settings
+
+```ini
+autosslca      = true
+sslcafile      = /etc/pki/tls/cert.pem      ; CentOS/RHEL
+; sslcapath    = /etc/ssl/certs             ; Debian/Ubuntu
+sslverifypeer  = true
+```
+
+### XML sanitisation
+
+Some servers return XML with characters outside the legal XML 1.0 range. Enable sanitisation to strip them automatically:
+
+```ini
+sanitize        = true
+sanitizeRegex[] = "/[^\x{0009}\x{000a}\x{000d}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]+/u"
+badXMLLog       = bad.xml.log
+```
+
+---
+
+## Running the harvester
+
+The harvester is invoked through VuFind's Symfony Console interface.
+
+```bash
+# Harvest all sources defined in oai.ini
+php $VUFIND_HOME/public/index.php harvest/harvest_oai
+
+# Harvest a single named source
+php $VUFIND_HOME/public/index.php harvest/harvest_oai --ini MyRepository
+
+# Specify an alternative oai.ini location
+php $VUFIND_HOME/public/index.php harvest/harvest_oai \
+    --ini /path/to/custom-oai.ini
+
+# Limit to the first N records (useful for testing)
+# Set stopAfter in oai.ini for the source, then run normally
+```
+
+<Note>
+Set the `VUFIND_LOCAL_DIR` environment variable before running the harvester. Without it, VuFind cannot locate your local configuration overrides, and harvested records will be written to the base installation directory.
+</Note>
+
+### Resumption tokens
+
+The harvester automatically handles OAI-PMH resumption tokens. If a harvest is interrupted, re-run the same command — it will pick up from the last successfully fetched token recorded in `last_state.txt` inside the harvest subdirectory.
+
+---
+
+## Processing harvested records
+
+After harvesting, files in each harvest subdirectory must be indexed into Solr. Use the batch scripts in `harvest/` that match the record format.
+
+### MARC records
+
+```bash
+# Import all .mrc and .xml files from harvest/MyRepository/
+$VUFIND_HOME/harvest/batch-import-marc.sh MyRepository
+
+# Use a custom SolrMarc properties file
+$VUFIND_HOME/harvest/batch-import-marc.sh -p /path/to/custom.properties MyRepository
+
+# Set a larger batch size (default is 10)
+$VUFIND_HOME/harvest/batch-import-marc.sh -x 25 MyRepository
+
+# Do not move processed files to processed/
+$VUFIND_HOME/harvest/batch-import-marc.sh -m MyRepository
+
+# Use a full directory path instead of a subdirectory under harvest/
+$VUFIND_HOME/harvest/batch-import-marc.sh -d /absolute/path/to/records
+```
+
+The batch script:
+1. Finds all `.mrc`, `.xml`, and `.marc` files in the target directory
+2. Sends them to `import-marc.sh` in batches (default: 10 files per batch)
+3. Moves processed files into a `processed/` subdirectory
+4. Writes per-batch logs under `log/`
+
+### Authority MARC records
+
+```bash
+$VUFIND_HOME/harvest/batch-import-marc-auth.sh MyAuthoritySource
+```
+
+### XSL-transformed records (Dublin Core, etc.)
+
+```bash
+$VUFIND_HOME/harvest/batch-import-xsl.sh MyDCSource
+```
+
+### Processing delete lists
+
+When an OAI-PMH server reports deleted records, the harvester writes their IDs to a delete list. Process it with:
+
+```bash
+$VUFIND_HOME/harvest/batch-delete.sh MyRepository
+```
+
+---
+
+## Scheduling automated harvesting
+
+A typical cron setup runs the harvest followed immediately by the import.
+
+```bash
+# Example crontab — run nightly at 2 AM
+0 2 * * * $VUFIND_HOME/harvest/batch-import-marc.sh MyRepository >> /var/log/vufind-harvest.log 2>&1
+```
+
+A more robust two-step approach, useful when import takes longer than the harvest window:
+
+```bash
+# Step 1 — harvest at 01:00
+0 1 * * * php $VUFIND_HOME/public/index.php harvest/harvest_oai >> /var/log/vufind-harvest.log 2>&1
+
+# Step 2 — import at 02:00
+0 2 * * * $VUFIND_HOME/harvest/batch-import-marc.sh MyRepository >> /var/log/vufind-import.log 2>&1
+
+# Step 3 — rebuild alphabetic browse at 04:00
+0 4 * * * $VUFIND_HOME/index-alphabetic-browse.sh >> /var/log/vufind-browse.log 2>&1
+```
+
+<Tip>
+Redirect both stdout and stderr (`>> logfile 2>&1`) so that errors from the PHP process appear in the log file rather than being silently discarded by cron.
+</Tip>
+
+---
+
+## Troubleshooting harvest failures
+
+<AccordionGroup>
+  <Accordion title="Harvest stops early with a resumption token error">
+    The OAI server returned an expired or invalid resumption token. Delete `last_state.txt` from the harvest subdirectory to force a full re-harvest from the beginning, then investigate whether the server has a shorter token expiry than the harvest duration.
+
+    ```bash
+    rm $VUFIND_LOCAL_DIR/harvest/MyRepository/last_state.txt
+    ```
+  </Accordion>
+
+  <Accordion title="SSL certificate verification fails">
+    Add the server's CA certificate path to `oai.ini`:
+
+    ```ini
+    sslcafile = /etc/pki/tls/cert.pem
+    ```
+
+    As a temporary diagnostic measure only, you can disable peer verification with `sslverifypeer = false`. Do not leave this in production.
+  </Accordion>
+
+  <Accordion title="Records contain illegal XML characters">
+    Enable the `sanitize` option in `oai.ini` for the affected source. Use `badXMLLog` to keep a copy of the raw bad XML for inspection:
+
+    ```ini
+    sanitize   = true
+    badXMLLog  = bad.xml.log
+    ```
+  </Accordion>
+
+  <Accordion title="Harvest hangs on large responses">
+    Increase the `timeout` value for the source. For very large repositories, also consider setting `stopAfter` to a small number during initial testing to confirm connectivity before running a full harvest.
+
+    ```ini
+    timeout   = 120
+    stopAfter = 50
+    ```
+  </Accordion>
+
+  <Accordion title="Records are harvested but not appearing in search results">
+    The most common cause is that the batch import step did not run, or failed silently. Check the log files under `harvest/MyRepository/log/`. Also verify that Solr is running and that `VUFIND_LOCAL_DIR` points to the correct local directory containing your import configuration.
+  </Accordion>
+
+  <Accordion title="Duplicate records after re-harvest">
+    Ensure that the `idSearch[]` / `idReplace[]` patterns produce the same IDs that were indexed previously. A change in the ID normalisation pattern will cause SolrMarc to create new documents instead of updating existing ones.
+  </Accordion>
+</AccordionGroup>

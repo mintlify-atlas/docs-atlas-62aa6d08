@@ -1,0 +1,317 @@
+---
+title: "Authentication Methods and User Permission Configuration"
+description: "Configure Database, LDAP, Shibboleth, ILS-native, OpenID Connect, and multi-auth login for VuFind, plus role-based access control with permissions.ini."
+---
+
+VuFind supports a wide range of authentication methods, from a built-in local database to federated identity providers and ILS-native login. All methods are selected through the `method` key in the `[Authentication]` section of `config.ini`, and each method has its own configuration section or companion file. The permission system in `permissions.ini` sits on top of authentication and lets you gate specific features by role, IP address, Shibboleth attribute, or username.
+
+## Selecting an authentication method
+
+Set the `method` key in `config.ini`:
+
+```ini
+[Authentication]
+method = Database
+```
+
+Available values:
+
+| Method | Description |
+|--------|-------------|
+| `Database` | VuFind's built-in user database (username + password stored locally) |
+| `ILS` | Authenticate directly against the ILS patron database |
+| `MultiILS` | ILS login across multiple backends (requires MultiBackend driver) |
+| `LDAP` | LDAP/Active Directory directory service |
+| `Shibboleth` | SAML 2.0 federated login via Shibboleth SP |
+| `CAS` | Central Authentication Service (deprecated — prefer OpenIDConnect) |
+| `OpenIDConnect` | OpenID Connect / OAuth 2.0 (configure in `OpenIDConnectClient.ini`) |
+| `AlmaDatabase` | Alma patron lookup combined with VuFind local database |
+| `Email` | Passwordless login via emailed authentication link |
+| `SIP2` | SIP2 protocol authentication against ILS |
+| `Facebook` | Facebook OAuth (configure in `[Facebook]` section) |
+| `PasswordAccess` | Hard-coded list of shared access passwords |
+| `SimulatedSSO` | Simulated SSO for development and testing only |
+| `MultiAuth` | Try multiple methods in sequence (e.g., ILS then LDAP) |
+| `ChoiceAuth` | Present multiple login options to the user |
+
+### Common authentication settings
+
+```ini
+[Authentication]
+method = Database
+
+; Allow users to change their password
+change_password = true
+
+; Allow password recovery via email
+recover_password = false
+recover_interval = 60
+
+; Force email verification before first login (Database only)
+verify_email = false
+
+; Hide the login link entirely (e.g., when Shibboleth handles auth externally)
+hideLogin = false
+
+; Hash passwords with bcrypt (always leave this true)
+hash_passwords = true
+
+; Encrypt catalog (ILS) passwords stored in the database
+encrypt_ils_password = false
+ils_encryption_key   = false
+ils_encryption_algo  = "aes"
+
+; Restrict registration to specific email domains
+;legal_domains[] = "myuniversity.edu"
+```
+
+<Warning>
+Never set `hash_passwords = false` in a production environment. Plain-text password storage is provided only for migrating data from very old VuFind releases.
+</Warning>
+
+## Authentication methods
+
+<Tabs>
+  <Tab title="Database">
+    VuFind's built-in method. Users create accounts through the registration form, and credentials are stored in VuFind's own database.
+
+    No additional section is needed beyond the `[Authentication]` block. To enable self-registration, ensure the registration route is accessible and optionally restrict to specific email domains:
+
+    ```ini
+    [Authentication]
+    method = Database
+    change_password    = true
+    recover_password   = true
+    verify_email       = true
+    ;legal_domains[] = "myuniversity.edu"
+    ```
+  </Tab>
+  <Tab title="LDAP">
+    Authenticate against an LDAP directory (including Active Directory). Add the `[LDAP]` section to your local `config.ini`:
+
+    ```ini
+    [Authentication]
+    method = LDAP
+
+    [LDAP]
+    uri      = ldap://ldap.myuniversity.edu:389
+    ; TLS is used by default for plain LDAP; set disable_tls = true only
+    ; if your server does not support it.
+    ;disable_tls = false
+    basedn   = "o=myuniversity.edu"
+    username = uid
+
+    ; Map LDAP schema attributes to VuFind user fields
+    firstname    = givenname
+    lastname     = sn
+    email        = mail
+    ;cat_username =
+    ;college      = studentcollege
+    ;major        = studentmajor
+
+    ; Bind credentials (if your LDAP requires a pre-bind)
+    ;bind_username = "uid=svcacct,o=myuniversity.edu"
+    ;bind_password = secret
+    ```
+
+    <Note>
+    For LDAPS, use `ldaps://` in the `uri` and omit `disable_tls`. The default port for LDAPS is 636.
+    </Note>
+  </Tab>
+  <Tab title="Shibboleth">
+    Shibboleth delegates login entirely to the institution's SAML identity provider. VuFind reads user attributes from Apache environment variables set by the Shibboleth SP.
+
+    ```ini
+    [Authentication]
+    method = Shibboleth
+
+    [Shibboleth]
+    ; Required: attribute that uniquely identifies the user
+    username  = persistent-id
+
+    ; Required: Shibboleth SP login URL
+    login     = https://shib.myuniversity.edu/Shibboleth.sso/Login
+
+    ; Optional: Logout URL
+    logout    = https://shib.myuniversity.edu/Shibboleth.sso/Logout
+
+    ; Optional: Post-login redirect target
+    ;target   = https://catalog.myuniversity.edu/vufind/MyResearch/Home
+
+    ; Optional: entityId of your IdP
+    ;provider_id = https://idp.myuniversity.edu/shibboleth-idp
+
+    ; Map Shibboleth attributes to user fields
+    email       = HTTP_MAIL
+    firstname   = HTTP_FIRST_NAME
+    lastname    = HTTP_LAST_NAME
+    ;cat_username = HTTP_ALEPH_ID
+
+    ; Enable per-IdP attribute overrides in Shibboleth.ini
+    ;allow_configuration_override = true
+
+    ; Attribute filters (user must match ALL listed filters to log in)
+    ;userattribute_1       = entitlement
+    ;userattribute_value_1 = urn:mace:dir:entitlement:common-lib-terms
+    ```
+
+    For consortial setups where different IdPs use different attributes, add per-IdP overrides to `Shibboleth.ini`:
+
+    ```ini
+    ; Shibboleth.ini
+    [instance1]
+    entityId     = https://example.org/idp/shibboleth
+    cat_username = unstructuredName
+
+    [instance2]
+    entityId     = https://other.institution/shibboleth/
+    ```
+
+    <Tip>
+    Enable `session_id = Shib-Session-ID` and run the `util/expire_external_sessions` utility periodically if you need SAML Single Logout support.
+    </Tip>
+  </Tab>
+  <Tab title="ILS">
+    Authenticate directly against your integrated library system. Patron credentials are validated by the ILS driver rather than VuFind's own database.
+
+    ```ini
+    [Authentication]
+    method = ILS
+
+    ; Field from patronLogin() to use as VuFind username (default: cat_username)
+    ;ILS_username_field = cat_username
+    ```
+
+    The ILS driver must implement `patronLogin()`. Most production drivers (KohaRest, Folio, Alma, SierraRest, etc.) support this. Check your driver's documentation for details on what patron data is returned and mapped.
+  </Tab>
+  <Tab title="OpenID Connect">
+    OpenID Connect is the recommended replacement for CAS. Configure it in `OpenIDConnectClient.ini` and set the method:
+
+    ```ini
+    [Authentication]
+    method = OpenIDConnect
+    ```
+
+    Then add your OIDC provider details to `local/config/vufind/OpenIDConnectClient.ini` following the template in `config/vufind/OpenIDConnectClient.ini`.
+  </Tab>
+</Tabs>
+
+## Multi-auth setups
+
+### MultiAuth — sequential fallback
+
+`MultiAuth` tries each method in order and grants access on the first success. It is only compatible with username/password methods (not Shibboleth).
+
+```ini
+[Authentication]
+method = MultiAuth
+
+[MultiAuth]
+method_order = ILS,LDAP
+; Trim whitespace from username and password before attempting login
+filters = "username:trim,password:trim"
+```
+
+### ChoiceAuth — user selects a method
+
+`ChoiceAuth` presents a login page where the user picks between two or more auth options.
+
+```ini
+[Authentication]
+method = ChoiceAuth
+
+[ChoiceAuth]
+choice_order = Shibboleth,Database
+```
+
+<Warning>
+`ChoiceAuth` does not reconcile usernames across methods. Ensure that any two methods you combine will return the same username for a given patron, or users may end up with duplicate accounts.
+</Warning>
+
+## Persistent login (remember me)
+
+```ini
+[Authentication]
+; Enable "remember me" for the listed methods
+;persistent_login = "database,multiils"
+
+; Token lifetime in days (default 60)
+;persistent_login_lifetime = 60
+
+; Send email on suspicious login
+;send_login_warnings = true
+```
+
+## Permission system (permissions.ini)
+
+`permissions.ini` grants named permissions to users based on conditions such as IP address, Shibboleth attribute, role, or username. VuFind checks these permissions at runtime to control access to specific features.
+
+### How rules work
+
+Each section in `permissions.ini` defines one rule. The rule grants one or more named permissions when its conditions are satisfied.
+
+```ini
+[rule.name]
+require    = ANY         ; ALL (default) or ANY
+permission = access.AdminModule
+role[]     = loggedin
+ipRange[]  = "10.0.0.0-10.255.255.255"
+```
+
+**Built-in roles:** `guest` (not logged in) and `loggedin` (any authenticated user).
+
+### Available condition types
+
+| Condition key | Description |
+|---------------|-------------|
+| `role` | Match a named role (`guest`, `loggedin`) |
+| `ipRange` | Single IP or range (e.g., `10.0.0.0-10.0.255.255`) |
+| `ipRegEx` | Regular expression matched against the client IP |
+| `username` | Match specific usernames |
+| `serverParam` | Match Apache/PHP server parameters (including Shibboleth attributes) |
+| `shibboleth` | Like `serverParam` but supports multi-valued Shibboleth attributes |
+| `insecureCookie` | Match a browser cookie value (low-security use only) |
+
+### Commonly used permissions
+
+```ini
+; Grant admin access to users from the library network
+[admin.ip]
+require    = ANY
+ipRange    = "192.168.1.0-192.168.1.255"
+permission = access.AdminModule
+
+; Grant staff view to logged-in users with a specific Shibboleth entitlement
+[staff.shibboleth]
+shibboleth = "entitlement urn:mace:dir:entitlement:library-staff"
+permission = access.StaffViewTab
+
+; Allow Primo module for all users
+[default.PrimoModule]
+role[] = guest
+role[] = loggedin
+permission = access.PrimoModule
+
+; Gate favorites to logged-in users only
+[default.Favorites]
+role[] = loggedin
+permission = feature.Favorites
+```
+
+### Full list of built-in permission names
+
+| Permission | Controls |
+|------------|----------|
+| `access.AdminModule` | Admin panel (also requires `admin_enabled = true` in `config.ini`) |
+| `access.DebugMode` | `?debug=true` GET parameter |
+| `access.EDSExtendedResults` | Protected EDS result fields |
+| `access.EITModule` | EBSCO EIT module |
+| `access.PrimoModule` | All Primo content |
+| `access.StaffViewTab` | Staff view tab on record pages |
+| `access.SummonExtendedResults` | Protected Summon result fields |
+| `feature.Developer` | Developer settings including API keys |
+| `feature.Favorites` | Save favorites / lists feature |
+
+<Info>
+See the [VuFind wiki on permission options](https://vufind.org/wiki/configuration:permission_options) for a complete reference including custom permission providers.
+</Info>

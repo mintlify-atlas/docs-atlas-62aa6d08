@@ -1,0 +1,203 @@
+---
+title: "Online Payment Integration for Library Fines in VuFind"
+description: "Configure Stripe or Paytrail to let patrons pay library fines through VuFind, including ILS requirements, transaction logging, and payment flow setup."
+---
+
+VuFind supports online payment of library fines directly through the patron's browser. When a patron views their account, they can select individual fines, proceed to a payment gateway, and have the payment registered back to the ILS — all without staff involvement. VuFind ships two production-ready payment handlers: **Stripe** and **Paytrail**. A `Test` handler is also included for development use.
+
+<Warning>
+Online payment is not enabled by default. You must configure both VuFind and your ILS driver to activate it. The ILS driver must support the `markFeesAsPaid()` method; check your driver's documentation before proceeding.
+</Warning>
+
+## Payment flow
+
+<Steps>
+  <Step title="Patron views fines">
+    The patron logs in and navigates to their account fines page. VuFind calls the ILS driver to retrieve outstanding fines.
+  </Step>
+  <Step title="Patron selects items to pay">
+    If `selectFines = true` in the driver's `[OnlinePayment]` section, the patron can choose which fines to include. Otherwise all payable fines are included.
+  </Step>
+  <Step title="VuFind starts a payment session">
+    VuFind calls `startPayment()` on the configured handler. The handler creates a checkout session with the payment provider and redirects the patron to the provider's hosted payment page.
+  </Step>
+  <Step title="Patron completes payment on the provider's page">
+    The patron enters card details on Stripe's or Paytrail's hosted page. VuFind is not involved in card data handling.
+  </Step>
+  <Step title="Provider calls the notify URL">
+    On success, the payment provider calls VuFind's notify endpoint server-to-server. VuFind validates the response via `processPaymentResponse()`, marks the payment record as paid, and registers it with the ILS.
+  </Step>
+  <Step title="Patron is redirected back">
+    The patron is sent back to VuFind's return URL. VuFind shows a confirmation or error page and refreshes the fines list.
+  </Step>
+</Steps>
+
+## ILS requirements
+
+For online payment to function, your ILS driver must:
+
+- Return fine data from `getMyFines()` including an amount and a fine type for each item.
+- Implement `markFeesAsPaid()` to register a completed payment back to the ILS.
+- Optionally implement `getPayableOnlineStatus()` to indicate whether a fine type can be paid online.
+
+Drivers known to support online payment include `KohaRest` and `SierraRest`. Check the driver's `.ini` file in `config/vufind/` for an `[OnlinePayment]` section — if one is present, the driver supports it.
+
+## Configuring the `[OnlinePayment]` section
+
+Payment is configured in your ILS driver's local `.ini` file (for example, `local/config/vufind/KohaRest.ini`). All settings below live in that file's `[OnlinePayment]` section.
+
+### General settings
+
+```ini
+[OnlinePayment]
+; Enable payment. Default is false.
+enabled = true
+
+; Optional service fee added to each transaction, in the smallest currency unit (e.g. cents).
+;serviceFee = 50
+
+; Minimum amount in the smallest currency unit that may be paid online.
+minimumFee = 500
+
+; Email address to notify when a payment cannot be registered with the ILS.
+;errorEmail = fines-support@library.example.org
+
+; Maximum minutes before a payment session is considered expired.
+paymentMaxDuration = 15
+
+; ISO 4217 currency code. Defaults to the defaultCurrency value from config.ini.
+;currency = "USD"
+
+; Allow patrons to select individual fines rather than paying everything at once.
+selectFines = true
+```
+
+### Configuring Stripe
+
+<Steps>
+  <Step title="Install the Stripe SDK">
+    ```bash
+    composer require stripe/stripe-php
+    ```
+  </Step>
+  <Step title="Add Stripe settings to the driver ini">
+    ```ini
+    [OnlinePayment]
+    enabled   = true
+    handler   = Stripe
+    ; Your Stripe secret key (starts with sk_live_ in production, sk_test_ in test mode)
+    apiKey    = "sk_live_..."
+    ```
+  </Step>
+  <Step title="Configure your Stripe webhook">
+    In the Stripe Dashboard, create a webhook pointing to:
+
+    ```
+    https://your-vufind.example.org/MyResearch/OnlinePaymentNotify
+    ```
+
+    Select the `checkout.session.completed` and `checkout.session.expired` events.
+  </Step>
+</Steps>
+
+<Note>
+The Stripe handler uses Stripe Checkout (a hosted payment page). Card data never touches your server. Stripe's webhook signature verification is handled automatically by the handler.
+</Note>
+
+### Configuring Paytrail
+
+<Steps>
+  <Step title="Install the Paytrail SDK">
+    ```bash
+    composer require paytrail/paytrail-php-sdk
+    ```
+  </Step>
+  <Step title="Add Paytrail settings to the driver ini">
+    ```ini
+    [OnlinePayment]
+    enabled    = true
+    handler    = Paytrail
+    ; Your Paytrail merchant ID
+    merchantId = '375917'
+    ; Your Paytrail secret key
+    secret     = 'SAIPPUAKAUPPIAS'
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+Paytrail supports a shop-in-shop model for consortial libraries. Map fine organizations to sub-merchant IDs using the `organizationMerchantIdMappings` setting documented in the driver's ini file.
+</Tip>
+
+## Fine type filtering
+
+Not all fine types should be payable online. Use these settings (in the `[OnlinePayment]` section) to control which fines appear:
+
+```ini
+; Fine types that are listed but cannot be paid online.
+nonPayableTypes[] = "Lost Item Replacement"
+
+; Fine types that block payment of the entire fine list when present.
+blockingNonPayableTypes[] = "Sundry"
+
+; Fine statuses (ILS-specific) that are not payable online.
+;nonPayableStatuses[] = "UNRETURNED"
+
+; Fine statuses that block the entire payment when present.
+;blockingNonPayableStatuses[] = "UNRETURNED"
+
+; Fine descriptions (plain string or /regex/) not payable online.
+;nonPayableDescriptions[] = "Lost.*replacement"
+
+; Fine descriptions that block payment completely.
+;blockingNonPayableDescriptions[] = "/Debt.*collection/"
+```
+
+## Product code mappings
+
+Payment providers often require a product code for each line item. Configure mappings from VuFind fine types to provider-specific codes:
+
+```ini
+; Default product code for all fines.
+productCode = "LIB_FINE_001"
+
+; Product code applied to the service fee line item.
+serviceFeeProductCode = "LIB_FEE_001"
+
+; Override product codes for specific fine types (colon-separated pairs).
+productCodeMappings = "Overdue=LIB_OVD_001:Long Overdue=LIB_OVD_002"
+```
+
+## Receipt configuration
+
+VuFind can generate a receipt page after successful payment:
+
+```ini
+; Enable receipt display. Default is false.
+receipt = true
+
+; Business identifier printed on the receipt.
+businessId = "1234567-8"
+
+; Show VAT breakdown on the receipt. Default is false.
+vatBreakdown = false
+
+; Optional contact information shown on the receipt (plain text or URL).
+;contactInfo = "https://library.example.org/fines|Contact the library for assistance"
+```
+
+## Transaction logging and reconciliation
+
+VuFind logs every payment event to the `audit_event` database table. Logging is controlled by `config.ini`:
+
+```ini
+[Logging]
+; Ensure payment events are logged (default when online payment is active).
+log_audit_events = "payment"
+```
+
+Each payment record includes the transaction ID, amount, patron identifier, timestamp, and the list of fines paid. Failed registrations (where VuFind received payment confirmation but could not reach the ILS) are flagged and trigger the `errorEmail` notification so staff can reconcile manually.
+
+<Warning>
+Always test the full payment flow in your payment provider's sandbox or test mode before enabling `handler = Stripe` or `handler = Paytrail` in production. Set `apiKey = "sk_test_..."` for Stripe or use Paytrail's test merchant credentials during testing.
+</Warning>

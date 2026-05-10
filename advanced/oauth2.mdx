@@ -1,0 +1,251 @@
+---
+title: "VuFind OAuth2 Server for External Application Integration"
+description: "Configure VuFind as an OAuth2 and OpenID Connect authorization server to give trusted external applications scoped access to patron data."
+---
+
+VuFind can act as an OAuth2 authorization server, enabling trusted third-party applications to request scoped access to patron data with the patron's consent. This is useful for integrating external discovery layers, mobile apps, or learning management systems that need to verify a patron's identity or retrieve their library account information without sharing credentials. VuFind's OAuth2 implementation also supports OpenID Connect (OIDC), so clients can use the standard discovery and token endpoints.
+
+## What the OAuth2 server enables
+
+External applications can request access to:
+
+- The patron's VuFind identity (user ID, username).
+- ILS profile information (name, email, address, phone, birthdate, locale).
+- Library-specific data (ILS card ID, a hashed library user identifier, block status).
+- OpenID Connect standard scopes (`openid`, `profile`, `email`, `address`, `phone`).
+
+VuFind issues short-lived access tokens and, optionally, refresh tokens. Token contents are signed with an RSA key pair; the public key is available at VuFind's JWKS endpoint so clients can verify tokens independently.
+
+## Key pair setup
+
+The OAuth2 server requires an RSA key pair. Generate one and place it in your local config directory:
+
+```bash
+openssl genrsa -out local/config/vufind/oauth2_private.key 2048
+chown apache local/config/vufind/oauth2_private.key
+chmod 600 local/config/vufind/oauth2_private.key
+
+openssl rsa -in local/config/vufind/oauth2_private.key -pubout \
+  > local/config/vufind/oauth2_public.key
+chown apache local/config/vufind/oauth2_public.key
+chmod 600 local/config/vufind/oauth2_public.key
+```
+
+<Warning>
+The private key must be readable only by the web server user. If it is world-readable, VuFind will refuse to start the OAuth2 server unless `keyPermissionChecks: false` is set — a setting intended only for local development.
+</Warning>
+
+## OAuth2Server.yaml configuration
+
+Copy `config/vufind/OAuth2Server.yaml` to `local/config/vufind/OAuth2Server.yaml` and edit the following sections.
+
+### Server section
+
+```yaml
+Server:
+  # Which user field is embedded in tokens as the subject identifier.
+  # Must be one of: id, username, cat_id.
+  # Warning: tokens are not encrypted — the chosen field will be visible
+  # to anyone who decodes the token payload.
+  userIdentifierField: "id"
+
+  # Paths to the RSA key pair (absolute or relative to the config directory).
+  privateKeyPath: "oauth2_private.key"
+  publicKeyPath:  "oauth2_public.key"
+
+  # Random string used to encrypt token payloads. Must be at least 32 characters.
+  encryptionKey: "your-random-32-character-string-here"
+
+  # Salt used when hashing the library_user_id claim. At least 32 characters.
+  hashSalt: "another-random-32-character-string"
+
+  # Optional URL for your OAuth2 documentation, returned in the discovery response.
+  documentationUrl: "https://library.example.org/oauth2-docs"
+```
+
+### Token lifetimes
+
+Token lifetimes are expressed as ISO 8601 durations:
+
+```yaml
+Grants:
+  # Authorization code lifetime (keep short — default: PT1M = 1 minute).
+  authCodeLifeTime: PT1M
+
+  # Access token lifetime (default: PT1H = 1 hour).
+  accessTokenLifeTime: PT1H
+
+  # Refresh token lifetime (default: PT1M = 1 minute).
+  refreshTokenLifeTime: PT1M
+```
+
+## Registering OAuth2 clients
+
+Each client application that will use VuFind as an OAuth2 provider must be registered in the `Clients` section of `OAuth2Server.yaml`.
+
+```yaml
+Clients:
+  my-app-client-id:
+    name: "My Library App"
+    # The URI the authorization server will redirect to after login.
+    redirectUri: "https://my-app.example.org/oauth/callback"
+    # Use PKCE (required for public/non-confidential clients).
+    pkce: true
+    # Whether this is a confidential client (server-side app with a secret).
+    isConfidential: false
+    # Hash of the client secret (confidential clients only).
+    # Generate with: php -r 'echo password_hash("secret", PASSWORD_DEFAULT) . PHP_EOL;'
+    secret: ""
+    # Optional: restrict which scopes this client may request.
+    #allowedScopes:
+    #  - openid
+    #  - email
+    #  - profile
+```
+
+<Tabs>
+  <Tab title="Public client (SPA or mobile app)">
+    Public clients cannot securely store a secret. Use PKCE and set `isConfidential: false`.
+
+    ```yaml
+    my-spa-client:
+      name: "Library Discovery SPA"
+      redirectUri: "https://discovery.example.org/callback"
+      pkce: true
+      isConfidential: false
+      secret: ""
+    ```
+  </Tab>
+  <Tab title="Confidential client (server-side app)">
+    Server-side applications can store a secret securely. Generate a bcrypt hash of the secret:
+
+    ```bash
+    php -r 'echo password_hash("my-client-secret", PASSWORD_DEFAULT) . PHP_EOL;'
+    ```
+
+    ```yaml
+    my-server-app:
+      name: "LMS Integration"
+      redirectUri: "https://lms.example.org/vufind-callback"
+      pkce: false
+      isConfidential: true
+      secret: "$2y$10$..."
+    ```
+  </Tab>
+</Tabs>
+
+## Available scopes
+
+Scopes control which patron data is included in the access token or returned from the userinfo endpoint. VuFind defines the following scopes out of the box:
+
+| Scope | Claims included | Requires ILS login |
+|---|---|---|
+| `openid` | `sub`, `nonce` | No |
+| `username` | `username` | No |
+| `cat_id` | `cat_id` | No |
+| `id` | `id` | No |
+| `name` | `name`, `given_name`, `family_name` | No |
+| `email` | `email`, `email_verified` | No |
+| `locale` | `locale` | No |
+| `library_user_id` | `library_user_id` (hashed card number) | No |
+| `profile` | Standard OIDC profile claims | Yes |
+| `address` | Standard OIDC address claim | Yes |
+| `phone` | Standard OIDC phone claim | Yes |
+| `age` | `age` (years) | Yes |
+| `birthdate` | `birthdate` | Yes |
+| `block_status` | `block_status` (boolean or null) | Yes |
+
+Scopes marked "Requires ILS login" fetch data from the patron's ILS profile. VuFind will prompt the patron to connect a library card during the authorization flow if one is not already linked.
+
+<Note>
+By default a client may request any scope. To restrict a client to a subset, list allowed scopes explicitly in the client's `allowedScopes` configuration.
+</Note>
+
+## Claim mappings
+
+The `ClaimMappings` section maps each OAuth2 claim name to a VuFind user entity method or a special computed field:
+
+```yaml
+ClaimMappings:
+  id:             getId
+  username:       getUsername
+  cat_id:         getCatId
+  name:           full_name        # getFirstname + ' ' + getLastname
+  given_name:     getFirstname
+  family_name:    getLastname
+  email:          getEmail
+  age:            age              # computed from ILS birthdate
+  birthdate:      birthdate        # from ILS profile
+  locale:         getLastLanguage
+  phone:          phone            # from ILS profile
+  address:        address_json     # OIDC address object from ILS fields
+  block_status:   block_status     # true/false/null from ILS
+  library_user_id: library_user_id_hash  # salted hash of cat_username
+```
+
+You can change these mappings to point to different entity methods or ILS profile fields by editing your local copy of `OAuth2Server.yaml`.
+
+## OpenID Connect support
+
+VuFind's OAuth2 server supports OpenID Connect. Clients that include the `openid` scope in their authorization request receive an ID token (a signed JWT) alongside the access token. The OIDC discovery document is available at:
+
+```
+https://your-vufind.example.org/.well-known/openid-configuration
+```
+
+The discovery document lists the authorization, token, userinfo, and JWKS endpoints, and the supported scopes and claims.
+
+## Authorization code flow
+
+<Steps>
+  <Step title="Client redirects the patron to VuFind">
+    The client sends the patron to VuFind's authorization endpoint with the required parameters:
+
+    ```
+    https://your-vufind.example.org/OAuth2/Authorize
+      ?response_type=code
+      &client_id=my-app-client-id
+      &redirect_uri=https://my-app.example.org/oauth/callback
+      &scope=openid+email+profile
+      &state=random-state-value
+      &code_challenge=<PKCE-challenge>
+      &code_challenge_method=S256
+    ```
+  </Step>
+  <Step title="Patron authenticates and consents">
+    VuFind presents its normal login page. After login, if the requested scopes include ILS data, VuFind prompts the patron to connect their library card. The patron then sees a consent screen listing the requested scopes.
+  </Step>
+  <Step title="VuFind redirects back with an authorization code">
+    VuFind sends the patron back to the client's `redirect_uri` with a short-lived authorization code (default lifetime: 1 minute).
+  </Step>
+  <Step title="Client exchanges the code for tokens">
+    The client makes a POST request to VuFind's token endpoint:
+
+    ```bash
+    curl -X POST https://your-vufind.example.org/OAuth2/Token \
+      -d grant_type=authorization_code \
+      -d code=<authorization-code> \
+      -d redirect_uri=https://my-app.example.org/oauth/callback \
+      -d client_id=my-app-client-id \
+      -d code_verifier=<PKCE-verifier>
+    ```
+
+    VuFind returns an access token, an optional refresh token, and (when `openid` scope was requested) an ID token.
+  </Step>
+  <Step title="Client uses the access token">
+    The client includes the access token in API requests as a Bearer token:
+
+    ```bash
+    curl https://your-vufind.example.org/OAuth2/UserInfo \
+      -H "Authorization: Bearer <access-token>"
+    ```
+  </Step>
+</Steps>
+
+## Supported grant types
+
+VuFind's OAuth2 server supports the **Authorization Code** grant type, optionally with PKCE. This is the only grant type recommended for patron-facing integrations. Implicit flow and client credentials flow are not supported.
+
+<Tip>
+Always use PKCE (`code_challenge` + `code_verifier`) even for confidential clients. It protects against authorization code interception and is required for any public client.
+</Tip>

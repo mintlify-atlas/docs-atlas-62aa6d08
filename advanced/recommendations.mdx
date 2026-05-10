@@ -1,0 +1,260 @@
+---
+title: "Configuring Search Recommendation Modules in VuFind"
+description: "Set up built-in recommendation panels — SideFacets, SpellingSuggestions, AuthorInfo — and build a custom recommendation module for VuFind search pages."
+---
+
+Recommendation modules are pluggable panels that appear alongside search results to help patrons refine their queries, discover related material, or correct search mistakes. Each module is an independent PHP class that reads the current search state, optionally issues additional queries, and renders a small template snippet. VuFind assembles these panels at three positions — the sidebar, the top of results, and the no-results area — based on configuration in `searches.ini`.
+
+## How recommendation modules work
+
+When a search runs, VuFind's search runner fires two lifecycle events that recommendation modules hook into:
+
+1. **`init()`** — Called before the main search. The module can read request parameters and modify the search parameters object to request extra data (for example, additional facets).
+2. **`process()`** — Called after the main search completes. The module can inspect the result set and prepare whatever data its template needs to render.
+
+VuFind then renders each module's template as a partial, passing two variables: the module object itself (`$recommend`) and the current search results object (`$results`).
+
+## Configuring recommendations in searches.ini
+
+The `[General]` section of `searches.ini` defines the default set of recommendation modules for all search types. You can also create search-type-specific overrides in `[SideRecommendations]`, `[TopRecommendations]`, and `[NoResultsRecommendations]`.
+
+```ini
+[General]
+; Modules shown above search results
+default_top_recommend[] = TopFacets:ResultsTop
+default_top_recommend[] = SpellingSuggestions
+
+; Modules shown in the sidebar
+default_side_recommend[] = SideFacets:Results:CheckboxFacets
+
+; Modules shown only when the result set is empty
+default_noresults_recommend[] = SwitchType
+default_noresults_recommend[] = SwitchQuery:::fuzzy
+default_noresults_recommend[] = SpellingSuggestions
+default_noresults_recommend[] = RemoveFilters
+```
+
+Each entry is the module class short name followed by colon-separated settings that are passed to the module's `setConfig()` method. Repeat the key (with `[]`) to load multiple modules in the same position.
+
+### Search-type overrides
+
+To attach a module to a specific search type (such as `Author`) rather than all searches, add it to the relevant section:
+
+```ini
+[TopRecommendations]
+Author[] = AuthorFacets
+Author[] = SpellingSuggestions
+
+[SideRecommendations]
+Subject[] = SideFacets
+Subject[] = OpenLibrarySubjectsDeferred:lookfor:5:true:topic,place,person,time
+```
+
+Set the value to `false` to suppress all recommendations for a particular search type:
+
+```ini
+[TopRecommendations]
+CallNumber[] = "TopFacets:ResultsTop"
+WorkKeys[]   = false
+```
+
+<Note>
+Any search type not listed in the override sections falls back to the `default_top_recommend`, `default_side_recommend`, and `default_noresults_recommend` values from `[General]`.
+</Note>
+
+## Built-in recommendation modules
+
+<AccordionGroup>
+  <Accordion title="SideFacets — faceted navigation sidebar">
+    Displays a set of facets beside search results, letting patrons narrow results by format, date, subject, location, and other indexed fields. This is the most commonly used recommendation module and is enabled by default.
+
+    **Signature:** `SideFacets:[regular facet section]:[checkbox facet section]:[ini name]:[include dynamic checkboxes]`
+
+    - `[regular facet section]` — Section name in the facet ini file (default: `Results`).
+    - `[checkbox facet section]` — Section name for checkbox-style facets (omit for none).
+    - `[ini name]` — Name of the facet ini file without extension (default: `facets`).
+    - `[include dynamic checkboxes]` — Boolean; set to `false` when using multiple `SideFacets` instances to avoid duplicating dynamic checkboxes.
+
+    ```ini
+    default_side_recommend[] = SideFacets:Results:CheckboxFacets
+    ```
+
+    `SideFacetsDeferred` is an AJAX variant that defers facet loading until the sidebar is visible, improving perceived performance on large indexes.
+
+    ```ini
+    ;default_side_recommend[] = SideFacetsDeferred:Results:CheckboxFacets
+    ```
+  </Accordion>
+  <Accordion title="SpellingSuggestions — did-you-mean">
+    Displays spelling corrections for the user's query when Solr's spellcheck component returns suggestions. Requires spelling to be enabled in `config.ini`.
+
+    ```ini
+    default_top_recommend[] = SpellingSuggestions
+    ```
+
+    No parameters are accepted. The module renders only when the search backend returns at least one spelling suggestion.
+  </Accordion>
+  <Accordion title="AuthorInfo — Wikipedia author biography">
+    Fetches a short biography and image from Wikipedia for the author matching the current search term. Designed for use in the top area on Author searches.
+
+    **Signature:** `AuthorInfo:[use_viaf]`
+
+    - `[use_viaf]` — Set to `true` to use the VIAF web service with a local authority Solr index to select the most appropriate author. Defaults to `false`.
+
+    ```ini
+    [TopRecommendations]
+    Author[] = AuthorInfo
+    ; or with VIAF:
+    Author[] = AuthorInfo:true
+    ```
+  </Accordion>
+  <Accordion title="RandomRecommend — random records">
+    Displays a set of randomly selected records, either from the entire backend or from within the current result set. Originally developed at Swansea University.
+
+    **Signature:** `RandomRecommend:[backend]:[limit]:[display mode]:[random mode]:[minimumset]:[facet1]:[facetvalue1]...`
+
+    - `[backend]` — Search backend identifier (default: `Solr`).
+    - `[limit]` — Number of records to display (default: `10`).
+    - `[display mode]` — `standard`, `images`, or `mixed` (default: `standard`).
+    - `[random mode]` — `retain` to draw from the current result set, `disregard` to draw from the full backend (default: `retain`).
+    - `[minimumset]` — Minimum result count before the panel appears (default: `0`).
+    - Additional colon pairs apply facet filters to the random selection.
+
+    ```ini
+    default_side_recommend[] = RandomRecommend:Solr:5:standard:retain:0
+    ```
+  </Accordion>
+  <Accordion title="ExpandFacets — cross-search facet links">
+    Displays facets that, when clicked, start a new search for all records matching that facet value rather than narrowing the current search. Useful for browsing by subject, format, or language.
+
+    **Signature:** `ExpandFacets:[ini section]:[ini name]`
+
+    - `[ini section]` — Section in the facet ini file listing the fields to display.
+    - `[ini name]` — Facet ini file name (default: `facets`).
+
+    ```ini
+    default_side_recommend[] = ExpandFacets:ResultsOnly
+    ```
+
+    `FacetCloud` provides the same functionality with a more compact cloud-style display.
+  </Accordion>
+  <Accordion title="SwitchQuery — query improvement suggestions">
+    Analyzes the patron's query and suggests modifications that may yield better results — for example, removing quotes from a phrase search that returns zero hits. Shown in the no-results area.
+
+    **Signature:** `SwitchQuery:[backend]:[opt-out checks]:[opt-in checks]`
+
+    - `[backend]` — Search backend (default: `Solr`).
+    - `[opt-out checks]` — Comma-separated list of default-on checks to disable.
+    - `[opt-in checks]` — Comma-separated list of off-by-default checks to enable, such as `fuzzy`.
+
+    ```ini
+    default_noresults_recommend[] = SwitchQuery:::fuzzy
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Sidebar vs. top vs. no-results placement
+
+| Position | Config key | Typical use |
+|---|---|---|
+| Sidebar | `default_side_recommend[]` / `[SideRecommendations]` | Facets, random records, external results |
+| Top of results | `default_top_recommend[]` / `[TopRecommendations]` | Spelling, author info, facet clouds |
+| No-results area | `default_noresults_recommend[]` / `[NoResultsRecommendations]` | Query fixes, filter removal, search-type switches |
+
+## Creating a custom recommendation module
+
+<Steps>
+  <Step title="Create the class">
+    Create a PHP class in your local module that implements `VuFind\Recommend\RecommendInterface`:
+
+    ```php
+    namespace MyModule\Recommend;
+
+    use VuFind\Recommend\RecommendInterface;
+
+    class BestSellers implements RecommendInterface
+    {
+        protected string $query = '';
+        protected array $results = [];
+
+        public function setConfig($settings): void
+        {
+            // $settings is the colon-separated string from searches.ini
+            // after the module name, e.g. "5:Solr"
+        }
+
+        public function init($params, $request): void
+        {
+            // Read the current query before the search runs
+            $this->query = $request->get('lookfor', '');
+        }
+
+        public function process($results): void
+        {
+            // Inspect results or issue additional queries
+            $this->results = $results->getResults();
+        }
+
+        public function getResults(): array
+        {
+            return $this->results;
+        }
+    }
+    ```
+  </Step>
+  <Step title="Create the template">
+    Add a template at `themes/<your-theme>/templates/Recommend/BestSellers.phtml`. The template receives `$recommend` (your object) and `$results` (the search results):
+
+    ```php
+    <?php if ($results = $recommend->getResults()): ?>
+    <div class="recommendation-box">
+      <h4><?= $this->transEsc('Best Sellers') ?></h4>
+      <ul>
+        <?php foreach ($results as $record): ?>
+          <li><?= $this->escapeHtml($record->getTitle()) ?></li>
+        <?php endforeach ?>
+      </ul>
+    </div>
+    <?php endif ?>
+    ```
+  </Step>
+  <Step title="Register in module config">
+    Add the module to the `recommend` plugin manager in your local `config/module.config.php`:
+
+    ```php
+    return [
+        'vufind' => [
+            'plugin_managers' => [
+                'recommend' => [
+                    'aliases' => [
+                        'BestSellers' => \MyModule\Recommend\BestSellers::class,
+                    ],
+                    'factories' => [
+                        \MyModule\Recommend\BestSellers::class =>
+                            \Laminas\ServiceManager\Factory\InvokableFactory::class,
+                    ],
+                ],
+            ],
+        ],
+    ];
+    ```
+  </Step>
+  <Step title="Activate in searches.ini">
+    Add the module to the appropriate position in your local `searches.ini`:
+
+    ```ini
+    [General]
+    default_side_recommend[] = BestSellers
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+If your recommendation module needs services from the container (for example, a search runner or configuration manager), generate a factory class using the VuFind generator command:
+
+```bash
+php public/index.php generate plugin \
+  MyModule\\Recommend\\BestSellers \
+  VuFind\\Recommend\\AbstractSearchObject
+```
+</Tip>

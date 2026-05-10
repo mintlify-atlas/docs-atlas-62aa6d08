@@ -1,0 +1,137 @@
+---
+title: "VuFind Configuration System Overview and Key Files"
+description: "Learn how VuFind's INI-based configuration system works, how local overrides take precedence, and which files control each aspect of your installation."
+---
+
+VuFind stores all of its configuration in plain INI files located under `config/vufind/`. Every aspect of the system — from the site title and session storage to which ILS driver is loaded and how searches are ranked — is controlled by one of these files. You never edit the defaults in place; instead, you copy individual files into a `local/` directory where your changes are isolated from upstream updates and survive version upgrades intact.
+
+## How the configuration system works
+
+VuFind resolves configuration files through a layered override chain. When the application needs a setting it looks, in order, at:
+
+1. `$VUFIND_LOCAL_DIR/config/vufind/<file>.ini` — your local overrides (highest priority)
+2. `$VUFIND_HOME/config/vufind/<file>.ini` — the distribution defaults (fallback)
+
+Only copy the sections you want to change into your local file. VuFind merges the two files at runtime, so any section or key absent from your local copy falls back to the distribution default automatically.
+
+<Note>
+The environment variable `VUFIND_LOCAL_DIR` defaults to `$VUFIND_HOME/local`. You can point it to a different path — for example, a directory outside the VuFind source tree — to keep your configuration entirely separate from the application code.
+</Note>
+
+## Overriding a configuration file
+
+<Steps>
+  <Step title="Locate the default file">
+    Find the file you want to customize in `$VUFIND_HOME/config/vufind/`. For example, to change search settings, the file is `searches.ini`.
+  </Step>
+  <Step title="Copy it to your local directory">
+    ```bash
+    cp $VUFIND_HOME/config/vufind/searches.ini \
+       $VUFIND_LOCAL_DIR/config/vufind/searches.ini
+    ```
+  </Step>
+  <Step title="Edit only the sections you need">
+    Open the local copy and modify the relevant keys. You can safely delete sections you are not changing — they will be inherited from the distribution defaults.
+  </Step>
+  <Step title="Verify the change">
+    Load a VuFind page in your browser. If `debug = true` is set in `config.ini [System]`, you will see active configuration values in the debug output.
+  </Step>
+</Steps>
+
+## Key configuration files
+
+The table below maps each major configuration file to the area it controls.
+
+| File | Controls |
+|------|----------|
+| `config.ini` | Site identity, session, authentication method, Solr connection, ILS driver, mail, database |
+| `searches.ini` | Search handlers, sorting, results per page, recommendations, spelling |
+| `searchspecs.yaml` | Field weights, Dismax/eDismax parameters, munge rules for each search type |
+| `facets.ini` | Facet fields, facet labels, date-range facets, hierarchical facets |
+| `permissions.ini` | Role-based access control — IP ranges, Shibboleth attributes, named roles |
+| `RecordTabs.ini` | Which tabs appear on the full record view and in what order |
+| `KohaRest.ini` / `Folio.ini` / `Alma.ini` | Driver-specific settings for the respective ILS |
+| `Shibboleth.ini` | Per-IdP attribute overrides for federated login |
+| `NoILS.ini` | Behaviour when no ILS is connected or the ILS is in maintenance mode |
+| `sms.ini` | SMS carrier gateway configuration for the "Text this" feature |
+| `CookieConsent.yaml` | Cookie consent categories, GDPR compliance settings |
+
+## config.ini — the main configuration file
+
+`config.ini` is the first file to customize for any new installation. Its most commonly edited sections are:
+
+**`[Site]`** — Sets the public-facing URL, site title, default theme, language, timezone, and display date/time formats.
+
+```ini
+[Site]
+url             = https://catalog.myuniversity.edu/vufind
+email           = support@myuniversity.edu
+title           = "University Library Catalog"
+theme           = sandal5
+language        = en
+locale          = en_US
+timezone        = "America/New_York"
+displayDateFormat = "m-d-Y"
+```
+
+**`[Index]`** — Points VuFind at its Solr instance and sets the default bibliographic core.
+
+```ini
+[Index]
+url             = http://localhost:8983/solr
+default_core    = biblio
+timeout         = 30
+default_dismax_handler = dismax
+```
+
+**`[Authentication]`** — Selects the login mechanism. See [Authentication](/configuration/authentication) for all options.
+
+```ini
+[Authentication]
+method = Database
+```
+
+**`[Catalog]`** — Selects the ILS driver. See [ILS Drivers](/configuration/ils-drivers) for all options.
+
+```ini
+[Catalog]
+driver          = Sample
+holds_mode      = "all"
+renewals_enabled = false
+```
+
+**`[Database]`** — Database connection string used by VuFind's own user database.
+
+```ini
+[Database]
+database = mysql://root@localhost/vufind
+```
+
+**`[Mail]`** — SMTP settings for outbound email (password resets, saved-search notifications, etc.).
+
+```ini
+[Mail]
+host = localhost
+port = 25
+```
+
+<Tip>
+After initial installation, set `autoConfigure = false` in `[System]` to prevent the auto-configuration wizard from interfering with your production settings.
+</Tip>
+
+## Explore configuration areas
+
+<CardGroup cols={2}>
+  <Card title="Search Configuration" icon="magnifying-glass" href="/configuration/search">
+    Configure Solr backends, search handlers, sorting options, results per page, field boosting, and faceted navigation.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/configuration/authentication">
+    Set up Database, LDAP, Shibboleth, CAS, ILS-native, or OpenID Connect login methods — including multi-auth setups.
+  </Card>
+  <Card title="ILS Drivers" icon="server" href="/configuration/ils-drivers">
+    Connect VuFind to Koha, FOLIO, Alma, Sierra, Voyager, Symphony, and many more integrated library systems.
+  </Card>
+  <Card title="Permissions" icon="shield" href="/configuration/authentication#permission-system">
+    Control access to admin panels, staff views, and gated content using IP ranges, roles, and Shibboleth attributes.
+  </Card>
+</CardGroup>

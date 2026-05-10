@@ -1,0 +1,303 @@
+---
+title: 'Indexing Records into VuFind with Solr'
+description: 'Learn how to start Solr, import MARC bibliographic and authority records, run the XSLT pipeline, rebuild indexes, and manage the alphabetic browse index.'
+---
+
+VuFind uses Apache Solr as its search backend. All records—bibliographic, authority, and course reserves—are stored and searched in Solr indexes. This page covers starting and stopping Solr, importing MARC records using SolrMarc, customizing the XSLT transformation pipeline, rebuilding the full index, and maintaining the alphabetic browse index.
+
+## Starting and stopping Solr
+
+VuFind ships with a wrapper script `solr.sh` that delegates to the standard Solr control script while applying VuFind-specific defaults.
+
+<Tabs>
+  <Tab title="Linux / macOS">
+    ```bash
+    # Start Solr
+    $VUFIND_HOME/solr.sh start
+
+    # Stop Solr
+    $VUFIND_HOME/solr.sh stop
+
+    # Restart Solr
+    $VUFIND_HOME/solr.sh restart
+
+    # Check status
+    $VUFIND_HOME/solr.sh status
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```bash
+    # Use the Solr binary directly on Windows
+    %VUFIND_HOME%\solr\vendor\bin\solr.cmd start -p 8983 -s "%VUFIND_HOME%\solr\vufind"
+    ```
+  </Tab>
+</Tabs>
+
+### Key environment variables
+
+The following variables control how `solr.sh` behaves. Set them in your shell or in a startup script before calling `solr.sh`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SOLR_HEAP` | `1G` | JVM heap size (e.g. `2G`, `512M`) |
+| `SOLR_PORT` | `8983` | TCP port Solr listens on |
+| `SOLR_HOME` | `$VUFIND_HOME/solr/vufind` | Directory containing Solr core configs |
+| `SOLR_LOGS_DIR` | `$SOLR_HOME/logs` | Directory for Solr log files |
+| `SOLR_ADDITIONAL_JVM_OPTIONS` | _(empty)_ | Extra JVM flags passed at startup |
+
+<Note>
+`SOLR_SECURITY_MANAGER_ENABLED` defaults to `false`. The Java security manager is incompatible with the AlphaBrowse handler and must remain disabled for alphabetic browse to work.
+</Note>
+
+### Solr cores
+
+VuFind's Solr home (`solr/vufind/`) contains four cores:
+
+- `biblio` — bibliographic records
+- `authority` — name/subject authority records
+- `reserves` — course reserves
+- `website` — web content crawl results
+
+---
+
+## Importing MARC records
+
+### import-marc.sh
+
+`import-marc.sh` is the primary entry point for indexing binary MARC (`.mrc`) or MARCXML files. It invokes SolrMarc with the configured properties file and writes documents into the `biblio` core.
+
+```bash
+# Basic usage — import a single file
+$VUFIND_HOME/import-marc.sh /path/to/records.mrc
+
+# Import multiple files at once
+$VUFIND_HOME/import-marc.sh /path/to/part1.mrc /path/to/part2.mrc
+
+# Override the properties file with -p
+$VUFIND_HOME/import-marc.sh -p /path/to/custom.properties /path/to/records.mrc
+```
+
+<Tip>
+Set `INDEX_OPTIONS` before calling the script to tune JVM memory. The default is `-Xms512m -Xmx512m`. For large files, increase both values:
+
+```bash
+export INDEX_OPTIONS="-Xms2g -Xmx2g -XX:+UseParallelGC"
+$VUFIND_HOME/import-marc.sh /path/to/large.mrc
+```
+</Tip>
+
+The script resolves properties files in this order:
+
+1. The value of `-p` if provided on the command line
+2. `$VUFIND_LOCAL_DIR/import/import.properties` if it exists
+3. `$VUFIND_HOME/import/import.properties` (bundled default)
+
+### import-marc-auth.sh
+
+`import-marc-auth.sh` is a thin wrapper around `import-marc.sh` that switches the properties file to `import_auth.properties`, which targets the `authority` Solr core. Use it to index MARC 21 authority files.
+
+```bash
+# Import an authority file
+$VUFIND_HOME/import-marc-auth.sh /path/to/authority.mrc
+
+# Supply an additional authority mapping file as the second argument
+$VUFIND_HOME/import-marc-auth.sh /path/to/authority.mrc marc_auth_fast_topical.properties
+```
+
+Multiple pre-built authority properties files are available in the `import/` directory:
+
+```
+import/
+├── import_auth.properties           # Default authority config
+├── marc_auth_fast_personal.properties
+├── marc_auth_fast_corporate.properties
+├── marc_auth_fast_topical.properties
+├── marc_auth_fast_geographic.properties
+├── marc_auth_fast_chronological.properties
+├── marc_auth_fast_event.properties
+├── marc_auth_fast_formgenre.properties
+├── marc_auth_fast_meeting.properties
+├── marc_auth_fast_title.properties
+└── marc_auth_ils.properties         # ILS-specific authority records
+```
+
+---
+
+## XSLT transformation pipeline
+
+### Properties files
+
+SolrMarc uses `.properties` files to map MARC fields to Solr fields. The most important file for local customisation is `marc_local.properties`.
+
+```ini
+# $VUFIND_LOCAL_DIR/import/marc_local.properties
+
+# Override the default title mapping to also index subtitle
+title = 245a:245b, first
+
+# Add a local custom field
+local_subject = 690a
+```
+
+<Note>
+Always place local overrides in `$VUFIND_LOCAL_DIR/import/marc_local.properties`, not in the base `marc.properties`. Changes to the base file will be overwritten on upgrade.
+</Note>
+
+The full properties inheritance chain is:
+
+```
+marc.properties          ← bundled field definitions
+marc_local.properties    ← local overrides (if present)
+import.properties        ← runtime settings (Solr URL, indexer class, etc.)
+```
+
+### Custom indexing scripts
+
+Field-level Java and BeanShell scripts live in `import/index_scripts/`. You can reference them from `marc_local.properties` to implement complex field logic without modifying the SolrMarc core.
+
+---
+
+## Batch importing with harvest scripts
+
+After an OAI-PMH harvest, use `harvest/batch-import-marc.sh` to process an entire harvest directory:
+
+```bash
+# Process a harvest directory named "oai_source"
+$VUFIND_HOME/harvest/batch-import-marc.sh oai_source
+
+# Use a custom properties file
+$VUFIND_HOME/harvest/batch-import-marc.sh -p /path/to/custom.properties oai_source
+
+# Set batch size (default is 10 files per batch)
+$VUFIND_HOME/harvest/batch-import-marc.sh -x 20 oai_source
+
+# Keep files in place (do not move to processed/)
+$VUFIND_HOME/harvest/batch-import-marc.sh -m oai_source
+```
+
+The script moves successfully processed files into a `processed/` subdirectory and writes per-batch log files under `log/`.
+
+---
+
+## Re-indexing and full rebuilds
+
+<Steps>
+  <Step title="Stop Solr">
+    Stop Solr before a full reindex to avoid partial state during the drop.
+
+    ```bash
+    $VUFIND_HOME/solr.sh stop
+    ```
+  </Step>
+  <Step title="Delete existing index data">
+    Remove the Solr data directories for the cores you are rebuilding.
+
+    ```bash
+    rm -rf $VUFIND_HOME/solr/vufind/biblio/index
+    rm -rf $VUFIND_HOME/solr/vufind/biblio/tlog
+    ```
+  </Step>
+  <Step title="Restart Solr">
+    ```bash
+    $VUFIND_HOME/solr.sh start
+    ```
+  </Step>
+  <Step title="Re-import all records">
+    ```bash
+    $VUFIND_HOME/import-marc.sh /path/to/full-dump.mrc
+    ```
+  </Step>
+  <Step title="Commit and optimize">
+    Force a commit and then optimize the index for best read performance.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/commit
+    php $VUFIND_HOME/public/index.php util/optimize
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Deleting index data is irreversible. Ensure you have a complete MARC source to reimport before removing index files.
+</Warning>
+
+---
+
+## Alphabetic browse index
+
+VuFind supports A-to-Z browse for titles, authors, subjects, call numbers (LC and Dewey), and hierarchy. These browse indexes are built by `index-alphabetic-browse.sh`, which extracts headings from the Solr `biblio` and `authority` cores, sorts them, and writes SQLite databases into `solr/vufind/alphabetical_browse/`.
+
+```bash
+$VUFIND_HOME/index-alphabetic-browse.sh
+```
+
+The script builds six browse databases:
+
+| Browse type | Solr field | Authority-aware |
+|---|---|---|
+| `hierarchy` | `hierarchy_browse` | Yes |
+| `title` | `title_fullStr` | No |
+| `topic` | `topic_browse` | Yes |
+| `author` | `author_browse` | Yes |
+| `lcc` | `callnumber-raw` | No |
+| `dewey` | `dewey-raw` | No |
+
+<Note>
+The browse indexes must be rebuilt after any significant change to the biblio or authority cores. Schedule `index-alphabetic-browse.sh` to run after nightly import jobs.
+</Note>
+
+### How the build process works
+
+<Steps>
+  <Step title="Extract headings">
+    `PrintBrowseHeadings` reads stored field values from the Solr Lucene index directory (`solr/vufind/biblio/index`) and writes a temporary tab-separated file.
+  </Step>
+  <Step title="Sort headings">
+    The temporary file is sorted with locale-aware `sort` into `sorted-<type>.tmp`.
+  </Step>
+  <Step title="Build SQLite database">
+    `CreateBrowseSQLite` converts the sorted file into a `<type>_browse.db` SQLite file.
+  </Step>
+  <Step title="Atomically swap the database">
+    The new database is moved into `alphabetical_browse/<type>_browse.db-updated` and a `<type>_browse.db-ready` touch file is written. The Solr browse handler picks it up on the next request.
+  </Step>
+</Steps>
+
+---
+
+## Managing the Solr index
+
+### Deleting individual records
+
+Use the `util/deletes` CLI command to remove a set of records by ID:
+
+```bash
+# Delete records listed in a flat ID file (one ID per line)
+php $VUFIND_HOME/public/index.php util/deletes ids.txt flat
+
+# Delete records from a MARC file (reads the 001 field)
+php $VUFIND_HOME/public/index.php util/deletes deleted.mrc marc
+
+# Delete records from a SolrMarc-format delete file
+php $VUFIND_HOME/public/index.php util/deletes deletes.txt filename
+```
+
+### Removing ILS-suppressed records
+
+```bash
+php $VUFIND_HOME/public/index.php util/suppressed
+```
+
+### Committing and optimizing
+
+```bash
+# Force a soft commit (makes recent index changes visible to searches)
+php $VUFIND_HOME/public/index.php util/commit
+
+# Optimize the index (merges segments; can be slow on large indexes)
+php $VUFIND_HOME/public/index.php util/optimize
+```
+
+<Tip>
+Optimization is not required for correctness and can take a long time on large collections. Consider scheduling it during low-traffic windows rather than after every import.
+</Tip>

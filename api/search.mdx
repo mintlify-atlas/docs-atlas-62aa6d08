@@ -1,0 +1,322 @@
+---
+title: 'Search API: Query the Bibliographic Index'
+description: 'Full reference for GET /api/v1/search. Covers query parameters, facets, filters, field selection, pagination, cursor-based harvesting, and response structure.'
+---
+
+The search endpoint lets you query VuFind's primary bibliographic index using the same underlying search engine that powers the catalog UI. Results can be filtered, faceted, sorted, and paginated. For bulk harvesting of large result sets, a cursor-based mode using `resumptionToken` is also available.
+
+## Endpoint
+
+```
+GET /api/v1/search
+POST /api/v1/search
+```
+
+Both GET and POST are supported. POST is useful when filter or field lists become too long for a query string.
+
+<Note>
+  Access to this endpoint requires the `access.api.Search` permission. On default installations this is open to all requests, but administrators may restrict it to specific IP ranges or require API key authentication. See the [API overview](/api/overview) for details.
+</Note>
+
+## Query parameters
+
+### Search query
+
+<ParamField query="lookfor" type="string" default="">
+  The search query string. Supports the same query syntax as the VuFind search UI. Leave empty to retrieve all records.
+</ParamField>
+
+<ParamField query="type" type="string">
+  The search handler (index) to use. Valid values depend on your VuFind configuration (e.g., `AllFields`, `Title`, `Author`, `Subject`). Defaults to the configured default handler.
+</ParamField>
+
+### Sorting
+
+<ParamField query="sort" type="string">
+  Sort order for results. Valid values depend on your VuFind sort configuration (e.g., `relevance`, `year desc`, `title`). Defaults to the configured default sort.
+</ParamField>
+
+### Pagination
+
+<ParamField query="page" type="integer" default="1">
+  Page number (1-indexed). Use with `limit` for standard page-based pagination. Ignored when `resumptionToken` is provided.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Number of records to return per page. Must be between `0` and the configured maximum (default `100`). Set to `0` to retrieve only metadata (result count, facets) without records.
+</ParamField>
+
+### Facets
+
+<ParamField query="facet[]" type="string[]">
+  One or more facet fields to compute and return alongside results. The value must be a valid Solr facet field name configured in VuFind's facet configuration (e.g., `format`, `language`, `institution`). Repeat the parameter for multiple facets.
+
+  Example: `?facet[]=format&facet[]=language`
+</ParamField>
+
+<ParamField query="filter[]" type="string[]">
+  One or more active facet filters to narrow the result set. Values follow VuFind's filter syntax: `fieldName:value` (e.g., `format:Book`, `language:English`). Repeat the parameter for multiple filters.
+
+  Example: `?filter[]=format:Book&filter[]=language:English`
+</ParamField>
+
+### Field selection
+
+<ParamField query="field[]" type="string[]">
+  List of record fields to include in the response. If omitted, only default fields are returned. If provided as an empty array, no record data is returned (only counts and facets). See the [available record fields](#available-record-fields) section below.
+
+  Example: `?field[]=id&field[]=title&field[]=authors`
+</ParamField>
+
+### Cursor-based pagination
+
+<ParamField query="resumptionToken" type="string">
+  Token for cursor-based iteration over large result sets. Pass `*` to start a new cursor search from the beginning. Pass the token value returned in a previous response to fetch the next batch. When `resumptionToken` is provided, `page` is ignored and `limit` is set to the cursor limit (default `200`, configurable via `[API] cursorLimit` in `searches.ini`). Facets are not returned in cursor mode.
+</ParamField>
+
+<Warning>
+  Cursor-based searches require at least one `field[]` parameter. Requests with an empty field list are rejected with a `400` error to prevent unnecessary processing.
+</Warning>
+
+## Available record fields
+
+The following fields can be requested via `field[]`. Fields marked as **default** are included automatically when no `field[]` parameter is supplied.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | yes | Record unique ID |
+| `title` | string | yes | Title including any subtitle |
+| `authors` | object | yes | Deduplicated authors grouped by role |
+| `formats` | string[] | yes | Format types (e.g., Book, Article) |
+| `languages` | string[] | yes | Languages of the record |
+| `series` | string[] | yes | Series names |
+| `subjects` | array of string[] | yes | Subject headings, least to most specific |
+| `urls` | object[] | yes | URLs contained in the record |
+| `accessRestrictions` | string[] | no | Access restriction notes |
+| `awards` | string[] | no | Award notes |
+| `bibliographicLevel` | string | no | Monograph, Serial, Collection, etc. |
+| `bibliographyNotes` | string[] | no | Bibliography notes |
+| `buildings` | string[] | no | Buildings where the record is held |
+| `callNumbers` | string[] | no | Call numbers |
+| `childRecordCount` | integer | no | Number of child records |
+| `cleanDoi` | string | no | First valid DOI |
+| `cleanIsbn` | string | no | First valid ISBN |
+| `cleanIssn` | string | no | Base portion of the first listed ISSN |
+| `cleanOclcNumber` | string | no | First OCLC number |
+| `containerEndPage` | string | no | End page in the containing item |
+| `containerIssue` | string | no | Issue number of the containing item |
+| `containerReference` | string | no | Reference to the containing item |
+| `containerStartPage` | string | no | Start page in the containing item |
+| `containerTitle` | string | no | Title of the containing item |
+| `containerVolume` | string | no | Volume of the containing item |
+| `corporateAuthors` | string[] | no | Main corporate authors |
+| `dedupIds` | string[] | no | IDs of deduplicated records |
+| `edition` | string | no | Edition statement |
+| `findingAids` | string[] | no | Finding aids |
+| `fullRecord` | string | no | Full metadata record (typically XML) |
+| `generalNotes` | string[] | no | General notes |
+| `geoLocations` | string[] | no | Geographic locations (points, bounding boxes) |
+| `hierarchicalPlaceNames` | string[] | no | Hierarchical place names for display |
+| `hierarchyParentId` | string[] | no | Parent record IDs (hierarchical records) |
+| `hierarchyParentTitle` | string[] | no | Parent record titles (hierarchical records) |
+| `hierarchyTopId` | string[] | no | Hierarchy top record IDs |
+| `hierarchyTopTitle` | string[] | no | Hierarchy top record titles |
+| `humanReadablePublicationDates` | string[] | no | Publication dates in human-readable format |
+| `institutions` | string[] | no | Institutions the record belongs to |
+| `isbns` | string[] | no | ISBNs |
+| `isCollection` | boolean | no | Whether the record is a collection node |
+| `issns` | string[] | no | ISSNs |
+| `lccn` | string[] | no | LCCNs |
+| `newerTitles` | string[] | no | Successor titles |
+| `oclc` | string[] | no | OCLC numbers |
+| `openUrl` | string | no | OpenURL |
+| `physicalDescriptions` | string[] | no | Physical dimensions etc. |
+| `placesOfPublication` | string[] | no | Places of publication |
+| `playingTimes` | string[] | no | Playing times (durations) |
+| `previousTitles` | string[] | no | Predecessor titles |
+| `primaryAuthors` | string[] | no | Primary authors |
+| `productionCredits` | string[] | no | Production credits |
+| `publicationDates` | string[] | no | Publication dates |
+| `publishers` | string[] | no | Publishers |
+| `rawData` | string | no | All data in the index fields |
+| `recordLinks` | object[] | no | Links to related records |
+| `recordPage` | string | no | Link to the record page in the UI |
+| `relationshipNotes` | string[] | no | Relationship notes |
+| `secondaryAuthors` | string[] | no | Secondary authors |
+| `shortTitle` | string | no | Title excluding subtitle |
+| `subjectsExtended` | object[] | no | Subject headings with type and source |
+| `subTitle` | string | no | Subtitle |
+| `summary` | string[] | no | Summary |
+| `systemDetails` | string[] | no | Technical details |
+| `targetAudienceNotes` | string[] | no | Target audience notes |
+| `titleSection` | string | no | Part/section portion of the title |
+| `titleStatement` | string | no | Statement of responsibility |
+| `toc` | string[] | no | Table of contents |
+
+## Response structure
+
+<ResponseField name="status" type="string" required>
+  `"OK"` on success, `"ERROR"` on failure.
+</ResponseField>
+
+<ResponseField name="resultCount" type="integer" required>
+  Total number of records matching the query.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  Array of record objects. Each object contains the fields requested via `field[]` (or the default fields if none were specified). Absent if no fields were requested.
+
+  <Expandable title="Record object properties (default fields)">
+    <ResponseField name="id" type="string">
+      Record unique ID. Use this value with the record endpoint to retrieve the full record.
+    </ResponseField>
+    <ResponseField name="title" type="string">
+      Title including any subtitle.
+    </ResponseField>
+    <ResponseField name="authors" type="object">
+      Deduplicated authors grouped by role (e.g., `primary`, `secondary`, `corporate`).
+    </ResponseField>
+    <ResponseField name="formats" type="string[]">
+      Format types (e.g., `"Book"`, `"Article"`, `"Journal"`).
+    </ResponseField>
+    <ResponseField name="languages" type="string[]">
+      Language codes or names.
+    </ResponseField>
+    <ResponseField name="series" type="string[]">
+      Series the record belongs to.
+    </ResponseField>
+    <ResponseField name="subjects" type="array">
+      Nested arrays of subject heading terms, from least specific to most specific.
+    </ResponseField>
+    <ResponseField name="urls" type="object[]">
+      URLs contained in the record, each with `url` and optionally `desc` properties.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="facets" type="object">
+  Facet results keyed by the facet field name. Each value is an array of facet entries. Only present when `facet[]` parameters were supplied and results include facet data.
+</ResponseField>
+
+<ResponseField name="resumptionToken" type="object">
+  Present only in cursor-based search responses. Contains `token` (the value to pass in the next request) and `expires` (ISO 8601 timestamp when the token expires).
+
+  <Expandable title="resumptionToken properties">
+    <ResponseField name="token" type="string">
+      Pass this value as `resumptionToken` in your next request to retrieve the next batch.
+    </ResponseField>
+    <ResponseField name="expires" type="string">
+      Expiry timestamp in `YYYY-MM-DD HH:MM:SS` format. Tokens are stored in the database and expire after a configured interval.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+<Tabs>
+  <Tab title="Basic search">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/search?lookfor=geology&type=AllFields"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 1842,
+      "records": [
+        {
+          "id": "12345",
+          "title": "Introduction to Geology",
+          "authors": {
+            "primary": { "Smith, John": [] }
+          },
+          "formats": ["Book"],
+          "languages": ["English"],
+          "series": [],
+          "subjects": [["Geology"]],
+          "urls": []
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="With facets and filters">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/search?\
+lookfor=climate+change\
+&facet[]=format\
+&facet[]=language\
+&filter[]=format:Book\
+&limit=5\
+&field[]=id\
+&field[]=title\
+&field[]=publicationDates"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 304,
+      "records": [
+        {
+          "id": "98765",
+          "title": "Climate Change: Evidence and Causes",
+          "publicationDates": ["2021"]
+        }
+      ],
+      "facets": {
+        "format": [
+          { "value": "Book", "count": 304, "href": "..." }
+        ],
+        "language": [
+          { "value": "English", "count": 289, "href": "..." },
+          { "value": "German", "count": 15, "href": "..." }
+        ]
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Cursor-based harvesting">
+    Start a cursor search by passing `resumptionToken=*`:
+
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/search?\
+resumptionToken=*\
+&field[]=id\
+&field[]=title"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 150000,
+      "records": [ ... ],
+      "resumptionToken": {
+        "token": "abc123xyz",
+        "expires": "2026-05-11 12:00:00"
+      }
+    }
+    ```
+
+    Fetch the next batch using the returned token:
+
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/search?\
+resumptionToken=abc123xyz\
+&field[]=id\
+&field[]=title"
+    ```
+
+    When `records` is absent from the response, the result set is exhausted.
+  </Tab>
+  <Tab title="With API key">
+    ```bash
+    curl -H "X-API-KEY: your-api-key" \
+      "https://your-vufind-instance.example.org/api/v1/search?lookfor=history&limit=10"
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  To retrieve only facet counts without record data, set `field[]` to an empty array (or omit it and set `limit=0`). This is efficient for building facet-only UI components.
+</Tip>

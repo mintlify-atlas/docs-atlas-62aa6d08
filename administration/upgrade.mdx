@@ -1,0 +1,267 @@
+---
+title: 'Upgrading VuFind to a New Version Safely'
+description: 'Step-by-step guide to backing up, running the VuFind upgrade commands, applying database migrations, resolving configuration conflicts, and verifying a successful upgrade.'
+---
+
+VuFind releases follow a regular cadence of minor and major versions. Upgrading involves replacing the application code, migrating configuration files, applying database schema changes, and re-running any Solr index rebuilds that the new version requires. Following the steps in order prevents data loss and reduces downtime.
+
+## Before you start
+
+<Warning>
+Always test an upgrade on a staging environment before applying it to production. A failed upgrade that touches the database or Solr index may be difficult to roll back.
+</Warning>
+
+### Check compatibility
+
+Review the release notes for every version between your current version and the target version. Pay particular attention to:
+
+- Removed or renamed configuration keys
+- Changes to the Solr schema that require reindexing
+- PHP version requirements
+- New required PHP extensions or Composer dependencies
+
+### Identify your current version
+
+```bash
+grep "'version'" $VUFIND_HOME/module/VuFind/src/VuFind/Config/Version.php
+```
+
+---
+
+## Step 1 — Back up your installation
+
+Back up all three layers before touching any files.
+
+<Steps>
+  <Step title="Back up the database">
+    ```bash
+    # MySQL / MariaDB
+    mysqldump -u vufind -p vufind > /backup/vufind-db-$(date +%Y%m%d).sql
+
+    # PostgreSQL
+    pg_dump -U vufind vufind > /backup/vufind-db-$(date +%Y%m%d).sql
+    ```
+  </Step>
+  <Step title="Back up your local configuration directory">
+    ```bash
+    cp -r "$VUFIND_LOCAL_DIR" "/backup/vufind-local-$(date +%Y%m%d)"
+    ```
+  </Step>
+  <Step title="Back up the Solr data directory">
+    Solr data can be large. A file-system snapshot or Solr replication backup is preferable to a file copy, but a simple copy works for smaller collections:
+
+    ```bash
+    # Stop Solr first to ensure a consistent backup
+    $VUFIND_HOME/solr.sh stop
+    cp -r "$VUFIND_HOME/solr/vufind" "/backup/vufind-solr-$(date +%Y%m%d)"
+    $VUFIND_HOME/solr.sh start
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Step 2 — Install the new VuFind code
+
+<Tabs>
+  <Tab title="Git">
+    ```bash
+    cd $VUFIND_HOME
+    git fetch origin
+    git checkout v10.0.0   # replace with the target tag
+    composer install --no-dev
+    ```
+  </Tab>
+  <Tab title="Release archive">
+    ```bash
+    # Download and extract the new release alongside the existing installation
+    tar -xzf vufind-10.0.0.tar.gz -C /opt
+    export NEW_VUFIND_HOME=/opt/vufind-10.0.0
+
+    # Install Composer dependencies in the new directory
+    cd $NEW_VUFIND_HOME
+    composer install --no-dev
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+Do not replace the running installation until the upgrade commands have been run and tested. If you extracted a new release archive, keep the old directory intact until you are confident the upgrade is complete.
+</Note>
+
+---
+
+## Step 3 — Upgrade configuration files
+
+The `upgrade/config` command compares your local configuration files against the new defaults, migrates settings that have moved or been renamed, and reports keys that could not be migrated automatically.
+
+```bash
+php $NEW_VUFIND_HOME/public/index.php upgrade/config \
+    --from 9.0 \
+    --olddir "$VUFIND_LOCAL_DIR" \
+    --newdir "$VUFIND_LOCAL_DIR"
+```
+
+Replace `9.0` with your current VuFind version number.
+
+<Steps>
+  <Step title="Run the config upgrade command">
+    ```bash
+    php $VUFIND_HOME/public/index.php upgrade/config \
+        --from <old-version> \
+        --olddir "$VUFIND_LOCAL_DIR" \
+        --newdir "$VUFIND_LOCAL_DIR"
+    ```
+  </Step>
+  <Step title="Review the output">
+    The command prints a summary of changes applied and a list of conflicts — settings it could not migrate automatically. Each conflict must be resolved manually.
+  </Step>
+  <Step title="Resolve conflicts manually">
+    Open the flagged configuration files and apply the changes described in the release notes. Common conflict sources include:
+
+    - Settings removed in the new version (safe to delete)
+    - Settings whose accepted values have changed (update the value)
+    - New required settings with no obvious default (read the release notes)
+  </Step>
+  <Step title="Verify theme overrides">
+    If you have a custom theme, check that template files that override core templates are still compatible. New releases sometimes change template variables or `.phtml` template structure.
+  </Step>
+</Steps>
+
+---
+
+## Step 4 — Apply database migrations
+
+The `upgrade/database` command applies all pending schema migrations in order. It is safe to run against a database that is already partially migrated — it skips migrations that have already been applied.
+
+```bash
+php $VUFIND_HOME/public/index.php upgrade/database
+```
+
+For automated deployments where interactive prompts are not possible:
+
+```bash
+php $VUFIND_HOME/public/index.php upgrade/database --no-interaction
+```
+
+<Warning>
+Run `upgrade/database` against a **backup copy** of the database first when upgrading across multiple major versions. Some migrations modify or drop columns and cannot be reversed.
+</Warning>
+
+### What the migration command does
+
+- Reads all migration classes from `module/VuFind/src/VuFind/Db/Migration/`
+- Compares the list against migrations already recorded in the `vufind_migration` table
+- Applies any outstanding migrations in version order
+- Records each successful migration so re-running the command is idempotent
+
+---
+
+## Step 5 — Rebuild the Solr index (if required)
+
+Check the release notes to determine whether the new version changes the Solr schema. If it does, a full reindex is required.
+
+<Steps>
+  <Step title="Replace Solr configuration files">
+    The new Solr schema, synonyms files, and `solrconfig.xml` are shipped with VuFind. Copy them into place:
+
+    ```bash
+    # If you have local Solr overrides, merge them back after copying
+    cp -r $VUFIND_HOME/solr/vufind/biblio/conf \
+          $VUFIND_HOME/solr/vufind/biblio/conf.bak
+    ```
+  </Step>
+  <Step title="Stop Solr and clear index data">
+    ```bash
+    $VUFIND_HOME/solr.sh stop
+    rm -rf $VUFIND_HOME/solr/vufind/biblio/index
+    rm -rf $VUFIND_HOME/solr/vufind/biblio/tlog
+    ```
+  </Step>
+  <Step title="Start Solr with the new configuration">
+    ```bash
+    $VUFIND_HOME/solr.sh start
+    ```
+  </Step>
+  <Step title="Re-import all records">
+    ```bash
+    $VUFIND_HOME/import-marc.sh /path/to/full-dump.mrc
+    ```
+  </Step>
+  <Step title="Rebuild the alphabetic browse index">
+    ```bash
+    $VUFIND_HOME/index-alphabetic-browse.sh
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Step 6 — Test after upgrade
+
+Run a basic smoke test before returning the site to users.
+
+<Steps>
+  <Step title="Verify the application loads">
+    Open the VuFind home page in a browser and confirm no PHP errors or missing templates are displayed.
+  </Step>
+  <Step title="Run a test search">
+    Search for a known record and confirm the result appears with the expected fields.
+  </Step>
+  <Step title="Test authentication">
+    Log in with a test account and confirm that saved searches and favourites are intact.
+  </Step>
+  <Step title="Check the alphabetic browse">
+    Navigate to the A-to-Z browse for titles and authors to confirm the SQLite databases were built correctly.
+  </Step>
+  <Step title="Review the application log">
+    ```bash
+    tail -n 100 $VUFIND_LOCAL_DIR/logs/vufind.log
+    ```
+
+    Look for `ERROR` or `CRITICAL` entries that indicate runtime problems.
+  </Step>
+</Steps>
+
+---
+
+## Common upgrade issues
+
+<AccordionGroup>
+  <Accordion title="White screen or PHP fatal error after upgrade">
+    This is most commonly caused by a Composer dependency version mismatch. Run `composer install --no-dev` in `$VUFIND_HOME` to ensure all dependencies match the new lockfile. Also check that the PHP version meets the new minimum requirement.
+  </Accordion>
+
+  <Accordion title="upgrade/config reports 'version not found'">
+    The `--from` value must exactly match a version string that VuFind's upgrade logic recognises. Use the version string from `Version.php` in the old installation (e.g. `9.0`, `9.1`, `10.0`).
+  </Accordion>
+
+  <Accordion title="Database migration fails with a duplicate column error">
+    A migration may have been partially applied during a previous failed upgrade attempt. Check the `vufind_migration` table for any migrations that are recorded as complete but left the schema in an inconsistent state. You may need to manually correct the schema and insert or delete rows from `vufind_migration` before retrying.
+
+    ```sql
+    SELECT * FROM vufind_migration ORDER BY migration_id;
+    ```
+  </Accordion>
+
+  <Accordion title="Search results disappear after upgrade">
+    If the Solr schema changed and you did not reindex, searches may return zero results or throw errors. Check the Solr Admin UI (`http://localhost:8983/solr`) for schema mismatch warnings, then follow the full reindex procedure in Step 5.
+  </Accordion>
+
+  <Accordion title="Alphabetic browse returns no results">
+    Run `index-alphabetic-browse.sh` and check for errors in its output. Common causes are: Solr not running, the `alphabetical_browse/` directory being unwritable, or the Java classpath not finding the required `.jar` files.
+
+    ```bash
+    $VUFIND_HOME/index-alphabetic-browse.sh 2>&1 | tee /tmp/browse-build.log
+    ```
+  </Accordion>
+
+  <Accordion title="Custom theme is broken after upgrade">
+    New VuFind releases sometimes change template variable names or `.phtml` block structure. Compare your overriding templates against the updated base templates using `diff` to identify incompatibilities:
+
+    ```bash
+    diff $VUFIND_HOME/themes/bootstrap5/templates/search/results.phtml \
+         $VUFIND_LOCAL_DIR/themes/mytheme/templates/search/results.phtml
+    ```
+  </Accordion>
+</AccordionGroup>

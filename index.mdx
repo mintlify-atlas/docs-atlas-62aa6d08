@@ -1,133 +1,67 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "VuFind: Open Source Library Discovery Portal"
+description: "VuFind is a library resource discovery platform built by libraries, for libraries. Search catalogs, repositories, and databases through one unified interface."
 ---
 
-## Setting up
+VuFind is an open source discovery environment that gives library patrons a single, unified interface to search across your catalog, institutional repositories, and third-party databases. Built on PHP and Apache Solr, VuFind integrates with 30+ integrated library systems and supports multiple external search backends including EDS, Primo, Summon, and WorldCat.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get VuFind running on your server in minutes with our step-by-step setup guide
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Full installation instructions for Linux, Windows, and package-based deployments
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Configuration" icon="sliders" href="/configuration/overview">
+    Configure search backends, authentication, ILS drivers, and site settings
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore VuFind's REST API for search, records, and authority data
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What VuFind does
 
-Everything you need to create world-class documentation.
+VuFind replaces or supplements your library's OPAC with a modern, faceted search experience. Patrons can search across bibliographic records, find holdings information from your ILS, place holds, manage their accounts, and discover related materials — all from one interface.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="30+ ILS Drivers" icon="database">
+    Connects to Folio, Koha, Sierra, Alma, Voyager, Symphony, and many more
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Multiple Search Backends" icon="magnifying-glass">
+    Solr, EDS, Primo, Summon, WorldCat, LibGuides, and ProQuest FSG
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Flexible Authentication" icon="lock">
+    LDAP, Shibboleth, CAS, OpenID Connect, ILS-native, and database auth
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Themeable UI" icon="paintbrush">
+    Bootstrap 5 themes with full local override support and mobile-responsive layouts
   </Card>
-</Columns>
+  <Card title="REST API" icon="plug">
+    Expose search and record data to external applications via a documented REST API
+  </Card>
+  <Card title="Multi-language" icon="language">
+    Ships with 40+ translations and a flexible i18n system for custom strings
+  </Card>
+</CardGroup>
 
-## Make your content agent ready
+## Get started
 
-Make your docs work for humans and AI agents alike.
+<Steps>
+  <Step title="Install VuFind">
+    Download the latest release and run `php install.php` to configure your environment. VuFind requires PHP 8.2+ and Apache Solr.
+  </Step>
+  <Step title="Connect your ILS">
+    Edit `config/vufind/config.ini` to point VuFind at your integrated library system. Choose from 30+ supported drivers in the `[Catalog]` section.
+  </Step>
+  <Step title="Index your records">
+    Import MARC records using the provided import scripts, or configure OAI-PMH harvesting to keep your index in sync automatically.
+  </Step>
+  <Step title="Customize and deploy">
+    Apply your institution's branding through the theme system, configure facets and search fields to match your collection, then go live.
+  </Step>
+</Steps>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Note>
+  VuFind is community-maintained open source software released under the GPL-2.0 license. The source code is available at [vufind-org/vufind](https://github.com/vufind-org/vufind) on GitHub.
+</Note>

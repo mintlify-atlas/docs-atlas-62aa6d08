@@ -1,0 +1,269 @@
+---
+title: "Translations and Internationalization in VuFind"
+description: "Configure VuFind's language system, override individual strings, add new languages, and support right-to-left scripts across your discovery portal."
+---
+
+VuFind has comprehensive internationalization (i18n) support built in. Every user-visible string in the interface is defined in a `.ini` language file, the active language is set in `config.ini`, and your institution can override individual strings or add entirely new languages without modifying any core files.
+
+## Available languages
+
+VuFind ships with language files for the following locales in the `languages/` directory:
+
+<CardGroup cols={2}>
+  <Card title="European languages" icon="globe">
+    `ca` Catalan · `cs` Czech · `cy` Welsh · `da` Danish · `de` German · `el` Greek · `en` English · `en-gb` English (UK) · `es` Spanish · `eu` Basque · `fi` Finnish · `fr` French · `ga` Irish · `gl` Galician · `hr` Croatian · `it` Italian · `nl` Dutch · `nl-be` Dutch (Belgium) · `pl` Polish · `pt` Portuguese · `pt-br` Portuguese (Brazil) · `ru` Russian · `se` Northern Sami · `sl` Slovenian · `sv` Swedish · `tr` Turkish · `uk` Ukrainian
+  </Card>
+  <Card title="Asian and other languages" icon="language">
+    `ar` Arabic · `bn` Bengali · `he` Hebrew · `hi` Hindi · `hy` Armenian · `ja` Japanese · `mi` Māori · `mn` Mongolian · `ta` Tamil · `vi` Vietnamese · `zh` Chinese (Traditional) · `zh-cn` Chinese (Simplified)
+  </Card>
+</CardGroup>
+
+Right-to-left languages (`ar`, `he`) are supported natively; see the [RTL section](#right-to-left-language-support) below.
+
+In addition to the top-level language files, VuFind organizes specialized string sets into subdirectories: `CallNumberFirst/`, `CookieConsent/`, `CreatorRoles/`, `DDC23/`, `Exception/`, `HoldingStatus/`, `ILSMessages/`, `ISO639-3/`, `IndexFieldDescription/`, `Payment/`, `RecordAttribute/`, `Reserves/`, `ServiceType/`, and `WorldCatFormats/`.
+
+## Setting the default language
+
+Open `local/config/vufind/config.ini` and locate the `[Site]` section:
+
+```ini local/config/vufind/config.ini
+[Site]
+; Default language used when the browser language is not matched or detection is off
+language = en
+
+; PHP locale used for number and date formatting
+locale   = en_US
+
+; Auto-detect the user's language from their browser Accept-Language header
+browserDetectLanguage = true
+
+; Fallback languages checked when a string is missing from the active language
+; Note: clear local/cache/ after changing this
+;fallback_languages = "en-gb,de"
+```
+
+<Note>
+`browserDetectLanguage = true` causes VuFind to honor the user's browser language preference. When the browser reports a language code that matches an available `.ini` file, that language is used automatically without any user action.
+</Note>
+
+## Language file format
+
+Language files are standard INI files with `key = "value"` pairs, one per line. Keys can contain spaces. Values must be quoted when they contain special characters or are empty.
+
+```ini languages/en.ini
+; Comments begin with a semicolon
+Abstract = "Abstract"
+Add to favorites = "Save to List"
+account_block_options_missing = "Some choices have been removed due to a block on your account. Details: %%details%%"
+add_to_favorites_html = "Add <em>%%title%%</em> to saved items"
+```
+
+Key points about the format:
+
+- Keys are case-sensitive.
+- Values may contain HTML (`<em>`, `<strong>`, etc.) when the template uses the `translate` or `transEsc` view helper appropriately.
+- Placeholders like `%%title%%` and `%%details%%` are replaced at render time with dynamic values.
+- The `aliases.ini` file maps one key to another, providing a simple aliasing mechanism for strings that should display identically (e.g., `bulk_email_cart = "bulk_email"`).
+
+## Overriding existing translations
+
+To change how a string appears in your installation, add only the key you want to change to a file in `local/languages/`. VuFind merges your local file on top of the core language file, so you need only the lines that differ.
+
+<Steps>
+  <Step title="Create local/languages/ if it does not exist">
+    ```bash
+    mkdir -p local/languages
+    ```
+  </Step>
+
+  <Step title="Add just the keys you want to change">
+    ```ini local/languages/en.ini
+    ; Institutional terminology overrides
+    Add to favorites           = "Save to My Collection"
+    title_wrapper              = "%%pageTitle%% — My University Library"
+    Library Catalog            = "My University Discovery"
+    ```
+  </Step>
+
+  <Step title="Clear the language cache">
+    After editing language files, clear the cache so VuFind picks up the changes:
+
+    ```bash
+    rm -rf local/cache/languages/*
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+When overriding strings in a non-English language, create the file with the matching language code, for example `local/languages/de.ini` for German overrides. VuFind applies local overrides independently per language.
+</Tip>
+
+## Creating custom language strings
+
+If you add new content to templates — for example, a custom help page or an institutional message — define new translation keys in your local language files rather than hard-coding text into the template.
+
+```ini local/languages/en.ini
+; Custom strings for institutional features
+my_custom_help_heading   = "Need Help?"
+my_custom_help_body      = "Contact the Reference Desk at %%phone%%"
+my_interlibrary_message  = "Items not in our collection can be requested via ILL."
+```
+
+In your template, call the `translate` (or `transEsc`) view helper:
+
+```php template.phtml
+<h2><?= $this->translate('my_custom_help_heading') ?></h2>
+<p><?= $this->transEsc('my_custom_help_body', ['%%phone%%' => '555-0100']) ?></p>
+```
+
+Add the same key (translated) to each other language file you support:
+
+```ini local/languages/fr.ini
+my_custom_help_heading  = "Besoin d'aide ?"
+my_custom_help_body     = "Contactez le bureau de référence au %%phone%%"
+```
+
+## Right-to-left language support
+
+VuFind has first-class support for right-to-left scripts. When the active language is a RTL language such as Arabic (`ar`) or Hebrew (`he`), VuFind automatically:
+
+- Adds the `dir="rtl"` attribute to the `<html>` element.
+- Loads RTL-aware Bootstrap 5 CSS (Bootstrap 5 supports logical properties natively).
+- Swaps directional icons (e.g., `more` ↔ `more-rtl`, `page-next` ↔ `page-next-rtl`).
+- Mirrors sidebar position if `mirrorSidebarInRTL = true` in `config.ini`.
+- Mirrors thumbnail position if `mirrorThumbnailsRTL = true` in `config.ini`.
+
+These settings are in the `[Site]` section of `config.ini`:
+
+```ini local/config/vufind/config.ini
+[Site]
+; Flip sidebar to opposite side for RTL languages
+mirrorSidebarInRTL   = true
+
+; Flip thumbnail position for RTL languages
+mirrorThumbnailsRTL  = true
+```
+
+## Adding a new language
+
+<Steps>
+  <Step title="Create the language file">
+    Add a new `.ini` file to `local/languages/` named with the [BCP 47](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry) language code. For a hypothetical Klingon (`tlh`) translation:
+
+    ```bash
+    touch local/languages/tlh.ini
+    ```
+  </Step>
+
+  <Step title="Declare a fallback language">
+    For languages where only a partial translation exists, point VuFind to a fallback language in `config.ini`. Strings not found in `tlh.ini` will be sourced from `en.ini`:
+
+    ```ini local/config/vufind/config.ini
+    [Site]
+    language           = tlh
+    fallback_languages = "en"
+    ```
+  </Step>
+
+  <Step title="Add the language to the switcher">
+    To make the language selectable in the interface, add it to the `[Languages]` section of `config.ini`:
+
+    ```ini local/config/vufind/config.ini
+    [Languages]
+    en  = English
+    fr  = Français
+    de  = Deutsch
+    tlh = Klingon
+    ```
+  </Step>
+
+  <Step title="Add a native-script label">
+    The `languages/native.ini` file maps language codes to their native-script names for use in the language switcher. Add your new language:
+
+    ```ini local/languages/native.ini
+    tlh = "tlhIngan Hol"
+    ```
+  </Step>
+
+  <Step title="Provide RTL direction hint (if applicable)">
+    If the language uses a right-to-left script, add a `rtl` entry for it in your local `native.ini` or through a theme config so VuFind sets `dir="rtl"` on the page.
+  </Step>
+</Steps>
+
+## Subdirectory language files
+
+Specialized string sets are organized into subdirectories of `languages/`. To override strings in one of these sets, mirror the subdirectory path under `local/languages/`:
+
+```bash
+mkdir -p local/languages/HoldingStatus
+```
+
+```ini local/languages/HoldingStatus/en.ini
+; Override holding status labels
+Available = "On the Shelf"
+Checked Out = "Currently Borrowed"
+```
+
+The available subdirectories and their purposes are:
+
+| Subdirectory | Contains |
+|---|---|
+| `CallNumberFirst/` | Call-number-first display labels |
+| `CookieConsent/` | Cookie consent dialog strings |
+| `CreatorRoles/` | MARC relator / creator role labels |
+| `DDC23/` | Dewey Decimal Classification labels |
+| `Exception/` | Error and exception messages |
+| `HoldingStatus/` | Item availability status labels |
+| `ILSMessages/` | Messages returned from the ILS driver |
+| `IndexFieldDescription/` | Solr field description labels |
+| `ISO639-3/` | Language names from the ISO 639-3 standard |
+| `Payment/` | Fine payment workflow strings |
+| `RecordAttribute/` | Record attribute display labels |
+| `Reserves/` | Course reserves strings |
+| `ServiceType/` | ILS service type labels |
+| `WorldCatFormats/` | WorldCat format type labels |
+
+## Language aliases
+
+The `languages/aliases.ini` file at the root of the `languages/` directory maps one translation key to another. This is useful when two different contexts should display the same string:
+
+```ini languages/aliases.ini
+bulk_email_cart       = "bulk_email"
+bulk_email_myresearch = "bulk_email"
+bulk_email_search     = "bulk_email"
+search_results_breadcrumb = "Search Results"
+```
+
+You can override aliases in `local/languages/aliases.ini` using the same format.
+
+<AccordionGroup>
+  <Accordion title="Debugging missing translations">
+    If a string appears in the interface as its raw key (e.g., `my_custom_heading` rather than the translated value), check:
+
+    1. The key is spelled exactly as it appears in the template call.
+    2. The language file has been saved and the cache cleared.
+    3. The key is in the correct language file for the active language.
+    4. There are no syntax errors in the INI file (unclosed quotes, invalid characters).
+  </Accordion>
+  <Accordion title="Translation fallback chain">
+    When a string is missing from the active language, VuFind searches:
+
+    1. Active language file (e.g., `fr.ini`)
+    2. Languages listed in `fallback_languages`
+    3. The default language (`language = en`)
+    4. English (`en.ini`) as the final fallback
+
+    This means a partial translation is always safe: untranslated strings fall back gracefully to English instead of showing raw keys.
+  </Accordion>
+  <Accordion title="Exposing translations to JavaScript">
+    VuFind can pass translation strings into the browser's JavaScript context using the `jsTranslations` view helper. Add keys to the helper call in your layout template:
+
+    ```php layout.phtml
+    $this->jsTranslations()->addStrings([
+        'my_js_message' => 'my_js_message',
+    ]);
+    ```
+
+    The strings are then available in JavaScript as `VuFind.translate('my_js_message')`.
+  </Accordion>
+</AccordionGroup>

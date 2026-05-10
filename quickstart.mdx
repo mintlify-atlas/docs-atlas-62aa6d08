@@ -1,81 +1,150 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Quick start: run VuFind in under 30 minutes"
+description: "Install dependencies, run the interactive installer, start Solr, and verify your VuFind instance is serving search results — all in one session."
 ---
 
-## Get started in three steps
+The fastest path to a working VuFind instance is a packaged release on a Debian/Ubuntu server. This guide installs all required system packages, runs `install.php` to configure your environment, starts Solr, and confirms the application responds. A packaged release bundles all PHP dependencies, so you do not need to run Composer for an initial evaluation.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, confirm the following on your server:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+| Requirement | Minimum version | Notes |
+|---|---|---|
+| PHP | 8.2 | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-xml` required |
+| Apache | 2.4 | `mod_rewrite` must be enabled |
+| Java | 11+ | Required by Apache Solr (bundled with VuFind) |
+| MySQL or MariaDB | 5.7 / 10.3 | For user accounts and saved searches |
+| Disk space | 2 GB | For the application, Solr index, and dependencies |
 
-### Step 2: Deploy your changes
+<Info>
+  VuFind also supports Nginx, but the packaged installer generates Apache configuration. Nginx users should follow the full [installation guide](/installation).
+</Info>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Steps
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Steps>
+  <Step title="Install system dependencies">
+    Update your package index and install the required system packages. The Vagrantfile in the repository demonstrates the canonical dependency set for Ubuntu 24.04.
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y git zip unzip apache2 default-jdk mysql-server \
+      libapache2-mod-php php-pear php php-curl php-dev php-gd php-intl \
+      php-json php-ldap php-mbstring php-mysql php-soap php-xml
+    ```
 
-### Step 3: Go live
+    Enable the Apache rewrite module:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```bash
+    sudo a2enmod rewrite
+    ```
+  </Step>
 
-## Next steps
+  <Step title="Download a packaged release">
+    Download the latest release archive from [vufind.org/vufind/downloads.html](https://vufind.org/vufind/downloads.html) and extract it to your chosen installation directory. Packaged releases include all Composer-managed PHP dependencies.
 
-Now that you have your docs running, explore these key features:
+    ```bash
+    # Replace x.y.z with the actual release version
+    tar -xzf vufind-x.y.z.tar.gz -C /usr/local/
+    mv /usr/local/vufind-x.y.z /usr/local/vufind
+    ```
+
+    <Tip>
+      If you prefer to install from a Git checkout instead, see the [full installation guide](/installation) which covers running `composer install` manually.
+    </Tip>
+  </Step>
+
+  <Step title="Run the interactive installer">
+    VuFind ships with `install.php`, a Symfony Console command that generates your Apache configuration, environment files, and local override directory structure.
+
+    ```bash
+    cd /usr/local/vufind
+    php install.php
+    ```
+
+    The installer prompts you for:
+
+    - **Local settings directory** — where VuFind stores configuration overrides and cache (default: `local/` inside the VuFind home directory)
+    - **Custom module name** — an optional PHP module for local code changes; leave blank to skip
+    - **Base path** — the URL path segment for VuFind (default: `/vufind`)
+    - **Solr port** — the port Solr will listen on (default: `8983`)
+
+    For a non-interactive installation using all defaults, pass `--use-defaults`:
+
+    ```bash
+    php install.php --use-defaults
+    ```
+
+    For scripted environments with a custom override directory:
+
+    ```bash
+    php install.php --non-interactive --overridedir=/vufindlocal
+    ```
+
+    <Note>
+      The installer writes `local/httpd-vufind.conf` (the Apache include file), `env.sh` (Unix environment variables), and `local/import/import.properties` (SolrMarc configuration).
+    </Note>
+  </Step>
+
+  <Step title="Load the Apache configuration">
+    Link the generated Apache configuration file into your server's active configuration directory, then restart Apache:
+
+    ```bash
+    # Ubuntu / Debian
+    sudo ln -s /usr/local/vufind/local/httpd-vufind.conf \
+               /etc/apache2/conf-enabled/vufind.conf
+    sudo systemctl restart apache2
+    ```
+
+    On Red Hat / CentOS systems the conf directory is `/etc/httpd/conf.d`. The installer's success message also prints the exact path for your platform.
+  </Step>
+
+  <Step title="Start Solr">
+    VuFind's Composer post-install scripts download a compatible Solr distribution into the project. Source the environment file so VuFind's CLI tools know where to find the installation, then start Solr:
+
+    ```bash
+    source /usr/local/vufind/env.sh
+    /usr/local/vufind/solr.sh start
+    ```
+
+    Solr starts on port `8983` by default. Confirm it is running:
+
+    ```bash
+    curl -s http://localhost:8983/solr/admin/cores?action=STATUS | grep -o '"status"'
+    ```
+  </Step>
+
+  <Step title="Verify the installation">
+    Open a browser and navigate to your VuFind base URL:
+
+    ```
+    http://your-server/vufind
+    ```
+
+    You should see the VuFind search interface. If you used the default base path, the URL is `http://localhost/vufind`.
+
+    To confirm the auto-configuration page is no longer displayed, open **`local/config/vufind/config.ini`** and set:
+
+    ```ini
+    autoConfigure = false
+    ```
+  </Step>
+</Steps>
+
+## What to do next
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Full installation guide" icon="list-check" href="/installation">
+    Covers system requirements, Git-checkout installation, Nginx, and troubleshooting.
+  </Card>
+  <Card title="Configuration overview" icon="sliders" href="/configuration/overview">
+    Connect your ILS, configure search backends, and set your site title and email.
+  </Card>
+  <Card title="Index records" icon="database" href="/administration/indexing">
+    Import MARC records or configure OAI-PMH harvesting to populate your Solr index.
+  </Card>
+  <Card title="Apply a theme" icon="paintbrush" href="/customization/themes">
+    Customise the Bootstrap 5 interface with your institution's branding.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

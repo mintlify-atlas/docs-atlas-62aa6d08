@@ -1,0 +1,405 @@
+---
+title: "VuFind Plugin Architecture and Custom Plugin Development"
+description: "Extend VuFind by creating custom Auth handlers, ILS drivers, recommendation modules, and record tabs using the Laminas MVC plugin system."
+---
+
+VuFind's extension model is built on Laminas MVC's plugin manager pattern. Nearly every behavioural component — authentication handlers, ILS drivers, recommendation modules, record drivers, record tabs, and view helpers — is loaded through a typed plugin manager that resolves class names against a service container. This means you can add or replace any component without modifying core files: you register your class in your local module configuration and the plugin manager picks it up automatically.
+
+## How plugin managers work
+
+Each plugin category has a dedicated `PluginManager` class, typically located alongside the plugins it manages (for example, `VuFind\Recommend\PluginManager`). Plugin managers extend Laminas's `AbstractPluginManager` and enforce a common interface — any class registered in that manager must implement the corresponding interface or the manager throws an exception at load time.
+
+At runtime, VuFind asks the manager for a plugin by its short name (for example, `SideFacets`). The manager resolves this to a fully-qualified class name through its `aliases` configuration, instantiates it through the service container (optionally via a factory), and returns the object.
+
+<Note>
+Always register plugins in your local module's `config/module.config.php` under the appropriate plugin manager key. Never edit files in `module/VuFind/` directly — your changes will be overwritten on upgrade.
+</Note>
+
+## Plugin categories
+
+<CardGroup cols={2}>
+  <Card title="Auth handlers" icon="lock">
+    Control how users log in. Implement `VuFind\Auth\AuthInterface`.
+  </Card>
+  <Card title="ILS drivers" icon="server">
+    Bridge VuFind to integrated library systems. Implement `VuFind\ILS\Driver\DriverInterface`.
+  </Card>
+  <Card title="Recommendation modules" icon="lightbulb">
+    Add contextual panels beside or above search results. Implement `VuFind\Recommend\RecommendInterface`.
+  </Card>
+  <Card title="Record tabs" icon="table-columns">
+    Add tabs on the full record view. Implement `VuFind\RecordTab\TabInterface`.
+  </Card>
+  <Card title="Record drivers" icon="file">
+    Control how individual records are presented. Extend `VuFind\RecordDriver\AbstractBase`.
+  </Card>
+  <Card title="View helpers" icon="eye">
+    Add reusable logic available in Laminas view scripts. Extend `Laminas\View\Helper\AbstractHelper`.
+  </Card>
+</CardGroup>
+
+## Creating a custom Auth handler
+
+A custom Auth handler lets you authenticate patrons against any external system. Your class must implement `VuFind\Auth\AuthInterface`.
+
+### AuthInterface methods
+
+```php
+namespace VuFind\Auth;
+
+use Laminas\Http\PhpEnvironment\Request;
+use VuFind\Db\Entity\UserEntityInterface;
+use VuFind\Exception\Auth as AuthException;
+
+interface AuthInterface
+{
+    // Called before login is processed — useful for delegation logic.
+    public function preLoginCheck($request);
+
+    // Reset any internal login state.
+    public function clearLoginState();
+
+    // Receive the VuFind configuration object.
+    public function setConfig($config);
+
+    // Whether CSRF checking applies for this request.
+    public function needsCsrfCheck($request);
+
+    // Return another auth method name to delegate to, or false.
+    public function getDelegateAuthMethod(Request $request);
+
+    // Optionally pre-authenticate; return data array or null.
+    public function preAuthenticate(Request $request): ?array;
+
+    // Receive pre-authentication data from a prior step.
+    public function setPreAuthenticationData(?array $data): void;
+
+    // Authenticate the user; return the user entity on success.
+    public function authenticate($request);
+
+    // Validate credentials without changing login state.
+    public function validateCredentials($request);
+
+    // Return true if the user's session has expired.
+    public function isExpired();
+
+    // Create a new user account from request data.
+    public function create($request);
+
+    // Update a user's password from request data.
+    public function updatePassword($request);
+
+    // Whether this method uses an external session initiator URL.
+    public function hasSessionInitiator(): bool;
+
+    // Return the URL that initiates an external login session, or null.
+    public function getSessionInitiator(string $target): ?string;
+
+    // Return the URL to redirect to after logout (may be modified).
+    public function getLogoutRedirectUrl(string $url): string;
+
+    // Whether this method supports in-VuFind account creation.
+    public function supportsCreation();
+
+    // Whether this method supports password changes.
+    public function supportsPasswordChange();
+
+    // Whether this method supports password recovery.
+    public function supportsPasswordRecovery(?string $target = null);
+
+    // Whether this method supports connecting a library card.
+    public function supportsConnectingLibraryCard();
+
+    // Return username policy array (e.g. minLength, maxLength).
+    public function getUsernamePolicy();
+
+    // Return password policy array (e.g. minLength, maxLength).
+    public function getPasswordPolicy(?string $target = null): array;
+
+    // Return recovery data (email, username, details) for password reset.
+    public function getPasswordRecoveryData(array $params): ?array;
+}
+```
+
+### Scaffolding and registration
+
+<Steps>
+  <Step title="Generate the skeleton">
+    Use the built-in generator command to scaffold an Auth plugin. Run this from your VuFind installation root:
+
+    ```bash
+    php public/index.php generate plugin \
+      MyModule\\Auth\\MyCustomAuth \
+      VuFind\\Auth\\AbstractBase
+    ```
+
+    The generator creates the class file and a stub factory, then prints the configuration snippet you need to add.
+  </Step>
+  <Step title="Implement the interface">
+    Open the generated class and fill in the `authenticate()` method at minimum. Call your external system and return a `UserEntityInterface` on success or throw `VuFind\Exception\Auth` on failure.
+  </Step>
+  <Step title="Register in module config">
+    Add the alias and factory to your local module's `config/module.config.php`:
+
+    ```php
+    return [
+        'vufind' => [
+            'plugin_managers' => [
+                'auth' => [
+                    'aliases' => [
+                        'MyCustomAuth' => \MyModule\Auth\MyCustomAuth::class,
+                    ],
+                    'factories' => [
+                        \MyModule\Auth\MyCustomAuth::class =>
+                            \MyModule\Auth\MyCustomAuthFactory::class,
+                    ],
+                ],
+            ],
+        ],
+    ];
+    ```
+  </Step>
+  <Step title="Select the handler in config.ini">
+    Point VuFind at your new handler in your local `config.ini`:
+
+    ```ini
+    [Authentication]
+    method = MyCustomAuth
+    ```
+  </Step>
+</Steps>
+
+## Creating a custom ILS driver
+
+An ILS driver connects VuFind to a library system. The required interface is `VuFind\ILS\Driver\DriverInterface`.
+
+### DriverInterface core methods
+
+```php
+namespace VuFind\ILS\Driver;
+
+interface DriverInterface
+{
+    // Receive the driver configuration array (from the driver's .ini file).
+    public function setConfig($config);
+
+    // Validate config and establish any connections. Called once at startup.
+    public function init();
+
+    // Return availability status for a single record ID.
+    // Returns array with keys: id, availability, status, location, reserve, callnumber.
+    public function getStatus($id);
+
+    // Return availability status for an array of record IDs.
+    // Returns an array of getStatus() results.
+    public function getStatuses($ids);
+
+    // Return full holding information for a record.
+    // Returns array with keys: id, availability, status, location, reserve,
+    // callnumber, duedate, number, barcode.
+    public function getHolding($id, ?array $patron = null, array $options = []);
+
+    // Return acquisitions history (e.g. recent serial issues) for a record.
+    public function getPurchaseHistory($id);
+}
+```
+
+<Tip>
+Most real-world drivers extend `VuFind\ILS\Driver\AbstractBase`, which provides no-op implementations of many optional methods (holds, renewals, patron profile, etc.). Start there rather than implementing `DriverInterface` directly.
+</Tip>
+
+### Registration
+
+```php
+// In local module config/module.config.php
+return [
+    'vufind' => [
+        'plugin_managers' => [
+            'ils_driver' => [
+                'aliases' => [
+                    'MyILS' => \MyModule\ILS\Driver\MyILS::class,
+                ],
+                'factories' => [
+                    \MyModule\ILS\Driver\MyILS::class =>
+                        \MyModule\ILS\Driver\MyILSFactory::class,
+                ],
+            ],
+        ],
+    ],
+];
+```
+
+Then set `driver = MyILS` in `config.ini [Catalog]`.
+
+## Creating a custom recommendation module
+
+Recommendation modules render contextual panels alongside search results. They must implement `VuFind\Recommend\RecommendInterface` and ship with a matching Smarty/Phtml template.
+
+### RecommendInterface methods
+
+```php
+namespace VuFind\Recommend;
+
+interface RecommendInterface
+{
+    // Receive the colon-separated settings string from searches.ini.
+    public function setConfig($settings);
+
+    // Called before the search runs; use this to set extra search parameters
+    // or read request data.
+    // $params  — \VuFind\Search\Base\Params
+    // $request — \Laminas\Stdlib\Parameters
+    public function init($params, $request);
+
+    // Called after the search runs; use this to read result data.
+    // $results — \VuFind\Search\Base\Results
+    public function process($results);
+}
+```
+
+Every recommendation module requires a corresponding template at
+`themes/<your-theme>/templates/Recommend/<ClassName>.phtml`. The template receives two variables: `$recommend` (your object) and `$results` (the search results object).
+
+### Registration
+
+```php
+// In local module config/module.config.php
+return [
+    'vufind' => [
+        'plugin_managers' => [
+            'recommend' => [
+                'aliases' => [
+                    'MyRecommend' => \MyModule\Recommend\MyRecommend::class,
+                ],
+                'factories' => [
+                    \MyModule\Recommend\MyRecommend::class =>
+                        \Laminas\ServiceManager\Factory\InvokableFactory::class,
+                ],
+            ],
+        ],
+    ],
+];
+```
+
+Then activate it in `searches.ini`:
+
+```ini
+[General]
+default_side_recommend[] = MyRecommend:setting1:setting2
+```
+
+## Creating a custom record tab
+
+Record tabs appear on the full record view. Implement `VuFind\RecordTab\TabInterface`.
+
+### TabInterface methods
+
+```php
+namespace VuFind\RecordTab;
+
+interface TabInterface
+{
+    // Return the label displayed on the tab button.
+    public function getDescription();
+
+    // Return true if the tab should be active (may depend on record data).
+    public function isActive();
+
+    // Return true if the tab is visible in the tab list by default.
+    public function isVisible();
+
+    // Return true if the tab content can be loaded via AJAX.
+    public function supportsAjax();
+
+    // Return true if this tab can be embedded in search results.
+    public function supportsSearchResultEmbedding(): bool;
+}
+```
+
+Each tab needs a template at `themes/<your-theme>/templates/RecordTab/<ClassName>.phtml`.
+
+### Registration
+
+```php
+return [
+    'vufind' => [
+        'plugin_managers' => [
+            'recordtab' => [
+                'aliases' => [
+                    'MyTab' => \MyModule\RecordTab\MyTab::class,
+                ],
+                'factories' => [
+                    \MyModule\RecordTab\MyTab::class =>
+                        \Laminas\ServiceManager\Factory\InvokableFactory::class,
+                ],
+            ],
+        ],
+    ],
+];
+```
+
+Enable the tab for a record driver by adding it to `RecordTabs.ini` in your local config directory:
+
+```ini
+[VuFind\RecordDriver\SolrDefault]
+tabs[MyTab] = MyTab
+defaultTab = null
+```
+
+## Using the generator command
+
+VuFind ships a code-generation command that scaffolds a plugin class, an optional factory, and prints the registration snippet. The general form is:
+
+```bash
+php public/index.php generate plugin \
+  <FullyQualifiedClassName> \
+  <ParentClassOrInterface>
+```
+
+<AccordionGroup>
+  <Accordion title="Generate an Auth handler">
+    ```bash
+    php public/index.php generate plugin \
+      MyModule\\Auth\\LdapCustom \
+      VuFind\\Auth\\AbstractBase
+    ```
+  </Accordion>
+  <Accordion title="Generate an ILS driver">
+    ```bash
+    php public/index.php generate plugin \
+      MyModule\\ILS\\Driver\\MySystem \
+      VuFind\\ILS\\Driver\\AbstractBase
+    ```
+  </Accordion>
+  <Accordion title="Generate a recommendation module">
+    ```bash
+    php public/index.php generate plugin \
+      MyModule\\Recommend\\BestSellers \
+      VuFind\\Recommend\\AbstractSearchObject
+    ```
+  </Accordion>
+  <Accordion title="Generate a record tab">
+    ```bash
+    php public/index.php generate plugin \
+      MyModule\\RecordTab\\StaffView \
+      VuFind\\RecordTab\\AbstractBase
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+The generator writes files relative to the module path it infers from the namespace. Verify the output path before committing. If the module directory does not exist yet, create it first.
+</Warning>
+
+## Local module configuration reference
+
+All plugin registrations share the same structure inside your module's `config/module.config.php`. The table below maps each plugin category to its configuration key.
+
+| Plugin category | Config key under `plugin_managers` |
+|---|---|
+| Auth handlers | `auth` |
+| ILS drivers | `ils_driver` |
+| Recommendation modules | `recommend` |
+| Record tabs | `recordtab` |
+| Record drivers | `recorddriver` |
+| View helpers (root) | `viewhelpermanager` |

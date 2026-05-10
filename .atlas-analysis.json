@@ -1,0 +1,101 @@
+{
+  "projectType": "saas",
+  "projectName": "VuFind",
+  "projectDescription": "An open source library resource discovery portal that enables patrons to search and browse library catalogs, institutional repositories, and external databases through a unified, customizable interface.",
+  "theme": "maple",
+  "primaryColor": "#9dca3c",
+  "lightColor": "#266eaa",
+  "darkColor": "#6c889a",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/search",
+              "configuration/authentication",
+              "configuration/ils-drivers"
+            ]
+          },
+          {
+            "group": "Customization",
+            "pages": [
+              "customization/themes",
+              "customization/local-overrides",
+              "customization/translations"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "administration/indexing",
+              "administration/harvesting",
+              "administration/cli-commands",
+              "administration/upgrade"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/plugins",
+              "advanced/recommendations",
+              "advanced/online-payment",
+              "advanced/oauth2"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "REST API",
+            "pages": [
+              "api/overview",
+              "api/search",
+              "api/records",
+              "api/authority"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Unified search across Solr, EDS, Primo, Summon, WorldCat and 20+ other backends",
+    "Supports 30+ ILS (Integrated Library System) drivers including Folio, Koha, Sierra, Alma, and Voyager",
+    "Multiple authentication methods: LDAP, Shibboleth, CAS, OpenID Connect, ILS-native",
+    "Fully customizable Bootstrap 5 theming system with local override support",
+    "Built-in OAI-PMH harvesting and MARC record import pipeline",
+    "REST API with Swagger UI for search, records, authority data, and admin functions",
+    "OAuth2 server for external integrations",
+    "Multi-language internationalization with 40+ bundled translations",
+    "Recommendation engine with faceted browsing and relevance ranking",
+    "Online payment integration (Stripe, Paytrail) for library fines"
+  ],
+  "publicApiSurface": [
+    "GET /api/v1/search — Full-text search across configured backends",
+    "GET /api/v1/record/{id} — Retrieve a single bibliographic record",
+    "GET /api/v1/records — Retrieve multiple records by ID",
+    "GET /api/v1/authority/search — Search authority records",
+    "GET /api/v1/authority/record/{id} — Retrieve a single authority record",
+    "GET /api/v1/admin — Admin management endpoints",
+    "GET /api/v1/website/search — Website content search endpoint",
+    "ILS\\Driver\\DriverInterface — Interface for integrating a new ILS system",
+    "Auth\\AuthInterface — Interface for implementing a custom authentication handler",
+    "Recommend\\RecommendInterface — Interface for adding custom recommendation modules",
+    "RecordTab\\TabInterface — Interface for adding custom record detail tabs",
+    "Search\\BackendManager — Service managing search backend registration"
+  ]
+}

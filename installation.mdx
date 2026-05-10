@@ -1,0 +1,365 @@
+---
+title: "VuFind installation: full walkthrough for Linux"
+description: "Complete guide to installing VuFind from a packaged release or Git checkout, configuring Apache, setting environment variables, and verifying a working system."
+---
+
+This guide walks through a complete VuFind installation on a Linux server, from confirming system requirements through first-run verification. Two installation methods are covered: a packaged release (recommended for production) and a Git checkout (recommended for development or when you need unreleased changes). Both methods end with the same Apache configuration and `install.php` step.
+
+## System requirements
+
+VuFind requires the following software to be installed before you begin:
+
+| Component | Minimum version | Notes |
+|---|---|---|
+| PHP | 8.2 | See required extensions below |
+| Apache | 2.4 | `mod_rewrite` required; Nginx supported but not covered by `install.php` |
+| Java | 11 | Required by the bundled Apache Solr |
+| MySQL or MariaDB | 5.7 / 10.3 | For user accounts, sessions, and saved searches |
+| Composer | 2.x | Required only for Git checkout installations |
+
+**Required PHP extensions:**
+
+```
+curl  gd  intl  json  ldap  mbstring  mysql  soap  xml
+```
+
+<Warning>
+  PHP 8.1 and below are not supported. The `composer.json` platform requirement is `>=8.2` and this is enforced at install time.
+</Warning>
+
+## Installation
+
+<Tabs>
+  <Tab title="Packaged release">
+    Packaged releases are available at [vufind.org/vufind/downloads.html](https://vufind.org/vufind/downloads.html). They include all Composer-managed PHP dependencies, so you do not need Composer installed on the server.
+
+    <Steps>
+      <Step title="Install system packages">
+        ```bash
+        sudo apt-get update
+        sudo apt-get install -y git zip unzip apache2 default-jdk mysql-server \
+          libapache2-mod-php php-pear php php-curl php-dev php-gd php-intl \
+          php-json php-ldap php-mbstring php-mysql php-soap php-xml
+        ```
+      </Step>
+
+      <Step title="Extract the archive">
+        Download the release tarball from the VuFind website and extract it. The example below uses `/usr/local/vufind` as the installation directory — adjust this path to suit your environment.
+
+        ```bash
+        # Replace x.y.z with the actual release version number
+        tar -xzf vufind-x.y.z.tar.gz -C /usr/local/
+        mv /usr/local/vufind-x.y.z /usr/local/vufind
+        ```
+      </Step>
+
+      <Step title="Run the installer">
+        ```bash
+        cd /usr/local/vufind
+        php install.php
+        ```
+
+        Proceed to the Configure Apache section below.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Git checkout">
+    Installing from a Git checkout gives you access to the latest development branch and makes it easy to pull updates.
+
+    <Steps>
+      <Step title="Install system packages and Composer">
+        In addition to the packages listed for a packaged release, you need Composer:
+
+        ```bash
+        sudo apt-get update
+        sudo apt-get install -y git zip unzip apache2 default-jdk mysql-server \
+          libapache2-mod-php php-pear php php-curl php-dev php-gd php-intl \
+          php-json php-ldap php-mbstring php-mysql php-soap php-xml
+
+        # Install Composer globally
+        php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+        php composer-setup.php
+        php -r "unlink('composer-setup.php');"
+        sudo mv composer.phar /usr/local/bin/composer
+        ```
+      </Step>
+
+      <Step title="Clone the repository">
+        ```bash
+        git clone https://github.com/vufind-org/vufind.git /usr/local/vufind
+        ```
+
+        To install a specific release tag instead of the `dev` branch:
+
+        ```bash
+        cd /usr/local/vufind
+        git checkout v10.1.0   # replace with desired version tag
+        ```
+      </Step>
+
+      <Step title="Install PHP dependencies">
+        The `composer install` command downloads all packages declared in `composer.json` and triggers the `post-install-cmd` scripts, which also download a compatible Solr distribution and Swagger UI assets.
+
+        ```bash
+        cd /usr/local/vufind
+        composer install
+        ```
+
+        <Note>
+          The first `composer install` can take several minutes. If the vendor directory already exists from a previous install, only changed packages are downloaded.
+        </Note>
+      </Step>
+
+      <Step title="Run the installer">
+        ```bash
+        php install.php
+        ```
+
+        Proceed to the Configure Apache section below.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## The installer in detail
+
+`install.php` is a Symfony Console command implemented in `module/VuFindConsole/src/VuFindConsole/Command/Install/InstallCommand.php`. It is interactive by default and accepts these options:
+
+| Option | Description |
+|---|---|
+| `--use-defaults` | Accept all defaults without prompting |
+| `--non-interactive` | Use provided options or defaults; no prompts |
+| `--overridedir=PATH` | Directory for local config, cache, harvest, and import files (default: `local/`) |
+| `--basepath=PATH` | URL base path for VuFind (default: `/vufind`) |
+| `--module-name=NAME` | Name of a custom PHP module for local code overrides |
+| `--solr-port=PORT` | Port Solr will listen on (default: `8983`) |
+| `--multisite=MODE` | Enable multi-site mode: `directory` or `host` |
+| `--skip-backups` | Overwrite existing files without creating `.bak` backups |
+| `--no-apache-help` | Suppress Apache configuration instructions in output |
+
+The installer creates or updates the following files:
+
+- **`local/httpd-vufind.conf`** — Apache `Include` fragment with `Alias`, `Directory`, and `SetEnv` directives
+- **`env.sh`** — Exports `VUFIND_HOME`, `VUFIND_LOCAL_DIR`, `VUFIND_LOCAL_MODULES`, and `SOLR_PORT`
+- **`env.bat`** — Windows equivalent of `env.sh`
+- **`local/import/import.properties`** — SolrMarc import configuration with paths resolved to your installation
+- **`local/import/import_auth.properties`** — SolrMarc import configuration for authority records
+
+## Configure Apache
+
+After the installer runs, load the generated configuration file into Apache.
+
+<Steps>
+  <Step title="Link the configuration file">
+    <Tabs>
+      <Tab title="Ubuntu / Debian">
+        ```bash
+        # The symlink name 'vufind.conf' is conventional; adjust if needed
+        sudo ln -s /usr/local/vufind/local/httpd-vufind.conf \
+                   /etc/apache2/conf-enabled/vufind.conf
+        ```
+      </Tab>
+      <Tab title="Red Hat / CentOS">
+        ```bash
+        sudo ln -s /usr/local/vufind/local/httpd-vufind.conf \
+                   /etc/httpd/conf.d/vufind.conf
+        ```
+      </Tab>
+      <Tab title="Manual include">
+        Alternatively, add a line directly to your `httpd.conf` or `apache2.conf`:
+
+        ```apache
+        Include /usr/local/vufind/local/httpd-vufind.conf
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Enable mod_rewrite and restart Apache">
+    ```bash
+    sudo a2enmod rewrite
+    sudo systemctl restart apache2
+    ```
+  </Step>
+</Steps>
+
+## Set environment variables
+
+For CLI tools (indexing, harvesting, maintenance commands) to locate VuFind, source `env.sh` in every shell session or add it to your system profile:
+
+```bash
+# Source for the current session
+source /usr/local/vufind/env.sh
+
+# Persist across sessions (all users)
+echo 'source /usr/local/vufind/env.sh' | sudo tee /etc/profile.d/vufind.sh
+```
+
+The file sets:
+
+```bash
+export VUFIND_HOME=/usr/local/vufind
+export VUFIND_LOCAL_DIR=/usr/local/vufind/local
+export SOLR_PORT=8983
+```
+
+## Start Solr
+
+```bash
+source /usr/local/vufind/env.sh
+/usr/local/vufind/solr.sh start
+```
+
+Confirm Solr is accepting requests:
+
+```bash
+curl -s "http://localhost:8983/solr/admin/cores?action=STATUS"
+```
+
+## Set file permissions
+
+The web server process needs write access to the cache and configuration directories in your override directory:
+
+```bash
+sudo chown -R www-data:www-data /usr/local/vufind/local/cache \
+                                /usr/local/vufind/local/config/vufind
+sudo chmod 777 /usr/local/vufind/local/cache/cli
+```
+
+<Warning>
+  `chmod 777` on `cache/cli` is required so that both the web server user (`www-data`) and your own shell user can write CLI cache files. Do not apply `777` to the `config/vufind` directory.
+</Warning>
+
+## First run and verification
+
+Open a browser and navigate to your VuFind URL (by default `http://your-server/vufind`). You should see the auto-configuration page that confirms Apache, PHP, and Solr are connected.
+
+Once you have reviewed the auto-configuration output, disable it in `local/config/vufind/config.ini`:
+
+```ini
+[System]
+autoConfigure = false
+```
+
+Key `[Site]` settings to review in the same file:
+
+```ini
+[Site]
+url   = http://library.myuniversity.edu/vufind
+email = support@myuniversity.edu
+title = "Library Catalog"
+theme = sandal5
+```
+
+The `generator` meta tag in `config.ini` confirms which version is running:
+
+```ini
+generator = "VuFind 11.0.4"
+```
+
+## Troubleshooting common issues
+
+<AccordionGroup>
+  <Accordion title="White page or 500 error after Apache restart">
+    Check the Apache error log for the actual PHP error:
+
+    ```bash
+    sudo tail -f /var/log/apache2/error.log
+    ```
+
+    Common causes:
+    - A required PHP extension is missing. Run `php -m` and compare against the extension list above.
+    - `vendor/autoload.php` is absent, which means `composer install` has not been run. This affects Git checkout installations only.
+    - File permissions prevent Apache from reading the VuFind directory. Ensure the VuFind root and all subdirectories are readable by `www-data`.
+  </Accordion>
+
+  <Accordion title="'Please run composer install' error from install.php">
+    This message is printed by `install.php` when `vendor/autoload.php` does not exist:
+
+    ```php
+    if (!file_exists(__DIR__ . '/vendor/autoload.php')) {
+        die("Please run 'composer install' to load dependencies.\n");
+    }
+    ```
+
+    Run `composer install` from the VuFind home directory and then re-run `install.php`. This error does not occur with packaged releases, which ship with `vendor/` included.
+  </Accordion>
+
+  <Accordion title="Solr fails to start or returns connection refused">
+    Verify Java is installed and on the PATH:
+
+    ```bash
+    java -version
+    ```
+
+    Check whether port `8983` is already in use:
+
+    ```bash
+    sudo lsof -i :8983
+    ```
+
+    If another process occupies the port, either stop it or reconfigure VuFind to use a different Solr port by re-running `install.php --solr-port=NEWPORT`.
+
+    Review the Solr log for startup errors:
+
+    ```bash
+    cat /usr/local/vufind/solr/vendor/server/logs/solr.log
+    ```
+  </Accordion>
+
+  <Accordion title="VuFind loads but the search returns no results">
+    An empty result set after installation is expected — no records have been indexed yet. Index MARC records using the import scripts:
+
+    ```bash
+    source /usr/local/vufind/env.sh
+    /usr/local/vufind/import-marc.sh /path/to/records.mrc
+    ```
+
+    See the [indexing guide](/administration/indexing) for full instructions, including OAI-PMH harvesting.
+  </Accordion>
+
+  <Accordion title="Apache configuration is not loading">
+    Confirm the symlink target exists and is readable:
+
+    ```bash
+    ls -la /etc/apache2/conf-enabled/vufind.conf
+    cat /usr/local/vufind/local/httpd-vufind.conf
+    ```
+
+    Validate the Apache configuration syntax before restarting:
+
+    ```bash
+    sudo apachectl configtest
+    ```
+
+    If `configtest` reports a syntax error in `httpd-vufind.conf`, re-run `php install.php` to regenerate the file.
+  </Accordion>
+
+  <Accordion title="Cache or config permission errors in the browser">
+    The auto-configuration page reports permission problems when `www-data` cannot write to the local directory. Fix ownership and then reload the page:
+
+    ```bash
+    sudo chown -R www-data:www-data /usr/local/vufind/local/cache \
+                                    /usr/local/vufind/local/config/vufind
+    sudo chmod 777 /usr/local/vufind/local/cache/cli
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration overview" icon="sliders" href="/configuration/overview">
+    Set your site title, ILS driver, search backends, and authentication method.
+  </Card>
+  <Card title="Index your records" icon="database" href="/administration/indexing">
+    Import MARC records or configure OAI-PMH harvesting to populate the Solr index.
+  </Card>
+  <Card title="Customise themes" icon="paintbrush" href="/customization/themes">
+    Apply your institution's branding through the Bootstrap 5 theme system.
+  </Card>
+  <Card title="CLI commands" icon="rectangle-terminal" href="/administration/cli-commands">
+    Explore VuFind's Symfony Console commands for maintenance and administration.
+  </Card>
+</CardGroup>

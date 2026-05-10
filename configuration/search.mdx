@@ -1,0 +1,312 @@
+---
+title: "Configuring Search Backends, Handlers, and Facets"
+description: "Configure Solr search handlers, sorting, results per page, field boosting in searchspecs.yaml, faceted navigation, and combined multi-backend search."
+---
+
+VuFind's search layer is split across three configuration files that work in concert: `searches.ini` controls runtime behaviour (default handler, sort order, results per page, recommendations), `searchspecs.yaml` controls how each search type maps to Solr fields and with what relevance weights, and `facets.ini` controls which facets appear and how they behave. Understanding what each file does — and which one to edit — is the key to tuning search quality for your collection.
+
+## Search backends
+
+VuFind supports multiple search backends. The default is Solr, but you can also connect to external discovery platforms.
+
+| Backend | Description |
+|---------|-------------|
+| **Solr** | VuFind's own Solr index — the most common setup |
+| **EDS** | EBSCO Discovery Service |
+| **Primo** | Ex Libris Primo |
+| **Summon** | ProQuest Summon |
+| **WorldCat** | OCLC WorldCat Search API |
+| **EIT** | EBSCO Integration Toolkit |
+| **Blender** | Combines results from multiple backends in a single result set |
+
+Each external backend has its own `.ini` file (e.g., `EDS.ini`, `Primo.ini`) for API credentials and backend-specific options. The active default backend is controlled by `defaultSearchBackend` in `config.ini [Site]`:
+
+```ini
+[Site]
+; Default = Solr when this is commented out
+;defaultSearchBackend = EDS
+```
+
+<Note>
+Access to Primo and EDS results can be gated by role in `permissions.ini` using the `access.PrimoModule` and `access.EDSExtendedResults` permissions respectively.
+</Note>
+
+## searches.ini — runtime search behaviour
+
+Copy `config/vufind/searches.ini` to `local/config/vufind/searches.ini` and edit the sections you need.
+
+### General settings
+
+```ini
+[General]
+default_handler      = AllFields   ; which search type is pre-selected
+default_sort         = relevance
+default_view         = list
+default_limit        = 20
+;limit_options       = 10,20,40,60,80,100
+
+; Boolean operators (AND/OR/NOT) are case-sensitive by default
+case_sensitive_bools = true
+case_sensitive_ranges = true
+
+; Highlight matched terms in results
+highlighting = true
+
+; Show text snippets when a match occurs in a non-displayed field
+snippets = true
+
+; Retain active facet filters across new searches
+retain_filters_by_default = true
+```
+
+### Search handlers (Basic\_Searches and Advanced\_Searches)
+
+These sections control which search types appear in the search box drop-down and on the advanced search form. Keys correspond to handler names in `searchspecs.yaml`; values are translation keys.
+
+```ini
+[Basic_Searches]
+AllFields           = "All Fields"
+Title               = Title
+Author              = Author
+Subject             = Subject
+CallNumber          = "Call Number"
+ISN                 = "ISBN/ISSN"
+tag                 = Tag
+
+[Advanced_Searches]
+AllFields           = adv_search_all
+Title               = adv_search_title
+Author              = adv_search_author
+Subject             = adv_search_subject
+CallNumber          = adv_search_callnumber
+ISN                 = adv_search_isn
+publisher           = adv_search_publisher
+Series              = adv_search_series
+year                = adv_search_year
+toc                 = adv_search_toc
+```
+
+### Sorting
+
+```ini
+[Sorting]
+relevance      = sort_relevance
+year           = sort_year
+year asc       = sort_year_asc
+callnumber-sort = sort_callnumber
+author         = sort_author
+title          = sort_title
+
+; Override default sort for specific search types
+[DefaultSortingByType]
+CallNumber = callnumber-sort
+```
+
+<Tip>
+The aliases `year`, `author`, and `title` in `[Sorting]` expand automatically to the Solr fields `publishDateSort`, `author_sort`, and `title_sort`. You can use either form.
+</Tip>
+
+### Applying default filters
+
+You can pre-filter all searches without exposing the filter to users as a facet:
+
+```ini
+[General]
+; Visible filters users can remove:
+default_filters[] = "format:Book"
+default_filters[] = "institution:MyInstitution"
+```
+
+For hidden, irremovable filters, use the `hiddenFilters[]` setting available in individual backend configuration files.
+
+### Recommendations modules
+
+Recommendations modules show suggestion boxes above (`[TopRecommendations]`) or beside (`[SideRecommendations]`) results.
+
+```ini
+[General]
+default_top_recommend[]  = TopFacets:ResultsTop
+default_top_recommend[]  = SpellingSuggestions
+default_side_recommend[] = SideFacets:Results:CheckboxFacets
+default_noresults_recommend[] = SwitchType
+default_noresults_recommend[] = SwitchQuery:::fuzzy
+default_noresults_recommend[] = SpellingSuggestions
+default_noresults_recommend[] = RemoveFilters
+```
+
+## searchspecs.yaml — field boosting and relevance tuning
+
+`searchspecs.yaml` defines how each named search type is translated into a Solr query. Each entry can specify `DismaxFields` (used when eDismax/Dismax can handle the query) and `QueryFields` (used for complex queries Dismax cannot handle).
+
+### Anatomy of a search type definition
+
+```yaml
+Title:
+  DismaxFields:
+    - title_short^500          # highest boost — exact short title match
+    - title_full_unstemmed^450
+    - title_full^400
+    - title^300
+    - title_alt^200
+    - title_new^100
+    - title_old
+    - series^100
+    - series2
+  DismaxHandler: edismax
+
+Author:
+  DismaxFields:
+    - author^100
+    - author2
+    - author_additional
+    - author_corporate
+    - author_variant
+    - author2_variant
+  DismaxHandler: edismax
+
+Subject:
+  DismaxFields:
+    - topic_unstemmed^150
+    - topic^100
+    - geographic^50
+    - genre^50
+    - era
+  DismaxHandler: edismax
+```
+
+### Tuning field weights
+
+Boost values (the numbers after `^`) are relative. A field with `^500` is weighted ten times more heavily than one with `^50`. To prioritize exact title matches over stemmed matches, give `title_full_unstemmed` a higher weight than `title_full`.
+
+### Dismax parameters
+
+You can override `mm` (minimum-should-match) or `bf` (boost function) per search type:
+
+```yaml
+AllFields:
+  DismaxFields:
+    - title_short^750
+    - title_full_unstemmed^600
+    - title_full^400
+    - title^500
+    - title_alt^200
+    - title_new^100
+    - title_old
+    - series^50
+    - topic_unstemmed^550
+    - topic^500
+    - author^300
+    - author2^100
+    - contents
+    - fulltext
+  DismaxParams:
+    - [mm, "0%"]
+  DismaxHandler: edismax
+```
+
+### JournalTitle with filter query
+
+```yaml
+JournalTitle:
+  DismaxFields:
+    - title_short^500
+    - title_full_unstemmed^450
+    - container_title^250
+    - series^100
+  DismaxHandler: edismax
+  FilterQuery: "format:Journal OR format:Article"
+```
+
+### Global boost functions
+
+The `GlobalExtraParams` block lets you apply boost functions conditionally across search types:
+
+```yaml
+GlobalExtraParams:
+  - param: bf
+    value: "recip(ms(NOW/DAY,publishDateSort),1,1000,1000)"
+    conditions:
+      - SearchTypeIn:
+        - AllFields
+        - Title
+      - NoDismaxParams:
+        - bf
+        - bq
+```
+
+<Warning>
+`searchspecs.yaml` is a YAML file — indentation is significant. Use spaces, not tabs, and validate the file with a YAML linter before restarting VuFind.
+</Warning>
+
+## facets.ini — faceted navigation
+
+`facets.ini` maps Solr field names to display labels and controls how facets are rendered.
+
+### Side facets (Results section)
+
+```ini
+[Results]
+institution        = Institution
+building           = Library
+format             = Format
+callnumber-first   = "Call Number"
+author_facet       = Author
+language           = Language
+genre_facet        = Genre
+era_facet          = Era
+geographic_facet   = Region
+publishDateRange   = "adv_search_year"
+```
+
+### Top facets
+
+```ini
+[ResultsTop]
+topic_facet        = "Suggested Topics"
+```
+
+### Date-range facets
+
+Fields listed under `dateRange[]` in `[SpecialFacets]` render as a year-range slider instead of a flat list:
+
+```ini
+[SpecialFacets]
+dateRange[] = publishDate
+dateRange[] = publishDateRange
+dateRangeFieldType[publishDateRange] = DateRangeField
+```
+
+### Hierarchical facets
+
+```ini
+[SpecialFacets]
+hierarchical[] = building
+hierarchical[] = format
+
+; Sort options: top | all | count | top-value | all-value
+hierarchicalFacetSortOptions[*] = all
+```
+
+### Checkbox facets
+
+Checkbox facets let users filter by a boolean condition rather than selecting a facet value:
+
+```ini
+[CheckboxFacets]
+; Filter value = Display label
+format:Online       = "Online Resources Only"
+```
+
+## Combined search (Blender)
+
+The Blender backend merges results from two or more backends into a single result list. Configure it in `Blender.ini` and reference it as a tab in your search configuration.
+
+```ini
+; In Blender.ini [Backends]
+Solr   = Local Catalog
+EDS    = Articles
+```
+
+<Info>
+The Blender backend respects the facet and sorting configuration of each sub-backend. Merged result sets are interleaved based on a configurable ratio defined in `Blender.ini [Blending]`.
+</Info>

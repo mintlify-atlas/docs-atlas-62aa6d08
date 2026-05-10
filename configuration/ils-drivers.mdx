@@ -1,0 +1,363 @@
+---
+title: "ILS Drivers: Connecting VuFind to Your Library System"
+description: "Select and configure an ILS driver in VuFind to connect Koha, FOLIO, Alma, Sierra, Voyager, Symphony, and other library systems for real-time patron services."
+---
+
+VuFind's ILS (Integrated Library System) driver layer is the bridge between the discovery portal and your library's circulation system. Drivers handle real-time operations such as holdings display, patron login, hold placement, loan renewal, and fine retrieval. Each driver implements a common interface so the rest of VuFind does not need to know which ILS is behind it. You select the driver in `config.ini`, then configure its connection details in a driver-specific INI file.
+
+## Selecting a driver
+
+In your local `config.ini`, set the `driver` key under `[Catalog]`:
+
+```ini
+[Catalog]
+driver = KohaRest
+```
+
+VuFind looks for a driver class named after this value in `module/VuFind/src/VuFind/ILS/Driver/`. All driver-specific settings live in a matching INI file (e.g., `KohaRest.ini`, `Folio.ini`, `Alma.ini`) — copy the relevant file from `config/vufind/` to `local/config/vufind/` before editing.
+
+## Common Catalog settings
+
+These settings in `config.ini [Catalog]` apply regardless of which driver you choose:
+
+```ini
+[Catalog]
+driver                  = KohaRest
+
+; Allow patrons to enter ILS credentials manually
+allowUserLogin          = true
+
+; Validate cached ILS credentials at login time
+checkILSCredentialsOnLogin = true
+
+; Fall back to NoILS driver if the main driver fails
+loadNoILSOnFailure      = false
+
+; How to display hold/recall links
+; Options: all | availability | disabled | driver | holds | recalls
+holds_mode              = "all"
+
+; Title-level holds
+; Options: disabled | always | availability | driver
+title_level_holds_mode  = "disabled"
+
+; Enable cancellation of holds, ILL requests, storage retrieval requests
+cancel_holds_enabled                        = false
+cancel_storage_retrieval_requests_enabled   = false
+cancel_ill_requests_enabled                 = false
+
+; Enable renewal from the My Account screen
+renewals_enabled = false
+
+; Group holdings by these fields (comma-separated)
+;holdings_grouping = holdings_id,location
+```
+
+## Supported drivers
+
+<Accordion title="Koha (KohaRest — recommended)">
+  `KohaRest` is the most feature-complete Koha driver, using Koha's native REST API. It requires Koha 20.05 or later and the [koha-plugin-rest-di](https://github.com/natlibfi/koha-plugin-rest-di) plugin installed on your Koha server.
+
+  ```ini
+  ; config.ini
+  [Catalog]
+  driver = KohaRest
+  ```
+
+  ```ini
+  ; local/config/vufind/KohaRest.ini
+  [Catalog]
+  ; Base URL of the Koha REST API (without version suffix)
+  host = "http://koha-server/api"
+
+  ; OAuth2 credentials — create these in Koha under
+  ; Patron > More > Manage API Keys
+  clientId     = "your-client-id"
+  clientSecret = "your-client-secret"
+
+  ; Optional: link back to Koha OPAC record pages
+  ;opacURL = "http://koha-server/cgi-bin/koha/opac-detail.pl?biblionumber=%%id%%"
+
+  ; Set to true only if VuFind and Koha share the same authentication source
+  ; (e.g., both use Shibboleth) and you do not want passwords re-validated
+  dontValidatePasswords = false
+  ```
+
+  **Prerequisites on the Koha server:**
+  1. Enable plugins in Koha system preferences
+  2. Install and enable the `koha-plugin-rest-di` plugin
+  3. Enable `RestOAuth2ClientCredentials` system preference
+  4. Create a Koha patron account for the API with the following minimum privileges: `circulate_remaining_permissions`, `catalogue`, `borrowers` (including `edit_borrowers` and `view_borrower_infos_from_any_libraries`), `reserveforothers`, `modify_holds_priority`, `place_holds`, `updatecharges`
+  5. Generate an API Client ID/Secret for that account
+
+  <Note>
+  If Koha's Apache server strips the `Authorization` header, add `SetEnvIf Authorization .+ HTTP_AUTHORIZATION=$0` to your Koha virtual host configuration.
+  </Note>
+</Accordion>
+
+<Accordion title="FOLIO (Folio)">
+  The `Folio` driver connects to FOLIO via Okapi. It supports holdings, patron login, holds, renewals, and fines.
+
+  ```ini
+  ; config.ini
+  [Catalog]
+  driver = Folio
+  ```
+
+  ```ini
+  ; local/config/vufind/Folio.ini
+  [API]
+  ; Okapi base URL
+  base_url = https://okapi.myuniversity.edu:9130
+  username = vufind_service_account
+  password = secret
+  ; Use password_file to avoid storing credentials in this file:
+  ;password_file = /etc/vufind/folio_password
+  tenant   = myinstitution
+
+  ; Use the legacy /authn/login endpoint (pre-Poppy releases)
+  legacy_authentication = true
+
+  ; Cache a single API token shared across all user sessions
+  global_token_cache = true
+
+  [IDs]
+  ; Which FOLIO identifier to use as VuFind's bib record ID
+  ; Options: instance (default) | hrid
+  type = instance
+  ```
+
+  <Tip>
+  For FOLIO Poppy and later, set `legacy_authentication = false` to use the more secure `/auth/login-with-expiry` endpoint, which issues short-lived tokens.
+  </Tip>
+</Accordion>
+
+<Accordion title="Alma (Ex Libris)">
+  The `Alma` driver connects to Ex Libris Alma via its REST APIs using an API key.
+
+  ```ini
+  ; config.ini
+  [Catalog]
+  driver = Alma
+  ```
+
+  ```ini
+  ; local/config/vufind/Alma.ini
+  [Catalog]
+  ; Alma API base URL (use the region closest to your server)
+  apiBaseUrl = "https://api-eu.hosted.exlibrisgroup.com/almaws/v1"
+  apiKey     = "your-api-key"
+  http_timeout = 30
+
+  ; Patron login method
+  ; Options:
+  ;   vufind   - Retrieve patron from Alma without password (use with AlmaDatabase auth)
+  ;   password - Alma internal user password authentication
+  ;   email    - Passwordless login via emailed authentication link
+  ;loginMethod = vufind
+
+  [Holds]
+  HMACKeys            = id:item_id:holdings_id
+  defaultRequiredDate = 0:1:0
+  extraHoldFields     = comments:requiredByDate:pickUpLocation
+  ```
+
+  <Note>
+  When using `loginMethod = vufind`, set `method = AlmaDatabase` in `config.ini [Authentication]` so that patron lookups use Alma as the authoritative source while VuFind manages local user records.
+  </Note>
+</Accordion>
+
+<Accordion title="Sierra REST (Innovative)">
+  ```ini
+  ; config.ini
+  [Catalog]
+  driver = SierraRest
+  ```
+
+  Configure credentials and base URL in `local/config/vufind/SierraRest.ini`. The driver uses Sierra's REST API (v5+) and supports holds, renewals, fines, and patron login.
+</Accordion>
+
+<Accordion title="Koha basic database access">
+  The `Koha` driver provides basic holdings lookup via direct database access. It is retained for backwards compatibility but `KohaRest` is preferred for new installations.
+
+  ```ini
+  [Catalog]
+  driver = Koha
+  ```
+</Accordion>
+
+<Accordion title="Koha ILS-DI">
+  `KohaILSDI` provides additional features over the basic `Koha` driver using Koha's ILS-DI API. Consider `KohaRest` instead for full feature coverage.
+
+  ```ini
+  [Catalog]
+  driver = KohaILSDI
+  ```
+</Accordion>
+
+<Accordion title="Voyager and VoyagerRestful">
+  - `Voyager` — database-only access for Voyager 6+
+  - `VoyagerRestful` — adds hold placement and renewal via Voyager 7+ RESTful web services
+
+  ```ini
+  [Catalog]
+  driver = VoyagerRestful
+  ```
+</Accordion>
+
+<Accordion title="Symphony (SirsiDynix)">
+  The `Symphony` driver uses SirsiDynix native APIs. `Unicorn` is a variant that requires installing the [VuFind-Unicorn connector](http://code.google.com/p/vufind-unicorn/) on your Symphony server.
+
+  ```ini
+  [Catalog]
+  driver = Symphony
+  ```
+</Accordion>
+
+<Accordion title="Evergreen">
+  ```ini
+  [Catalog]
+  driver = Evergreen
+  ```
+
+  Evergreen support uses the OpenSRF/Evergreen web services. Configure connection details in `local/config/vufind/Evergreen.ini`.
+</Accordion>
+
+<Accordion title="DAIA">
+  The `DAIA` driver integrates with any system that exposes a DAIA (Document Availability Information API) endpoint.
+
+  ```ini
+  [Catalog]
+  driver = DAIA
+  ```
+</Accordion>
+
+<Accordion title="PAIA">
+  `PAIA` (Patron Account Information API) is a JSON-based patron services API. It is commonly used with open-source systems exposing PAIA endpoints.
+
+  ```ini
+  [Catalog]
+  driver = PAIA
+  ```
+</Accordion>
+
+<Accordion title="Polaris">
+  ```ini
+  [Catalog]
+  driver = Polaris
+  ```
+
+  Configure Polaris API endpoint and credentials in `local/config/vufind/Polaris.ini`.
+</Accordion>
+
+<Accordion title="Aleph">
+  ```ini
+  [Catalog]
+  driver = Aleph
+  ```
+
+  Configure the X-Server URL and related settings in `local/config/vufind/Aleph.ini`.
+</Accordion>
+
+<Accordion title="GeniePlus">
+  ```ini
+  [Catalog]
+  driver = GeniePlus
+  ```
+</Accordion>
+
+<Accordion title="XCNCIP2">
+  The `XCNCIP2` driver connects via the XC NCIP Toolkit v2.x protocol, enabling VuFind to work with any ILS that supports NCIP.
+
+  ```ini
+  [Catalog]
+  driver = XCNCIP2
+  ```
+</Accordion>
+
+<Accordion title="NewGenLib and Amicus">
+  These drivers provide basic support for NewGenLib and Amicus library systems respectively.
+
+  ```ini
+  [Catalog]
+  driver = NewGenLib
+  ; or
+  driver = Amicus
+  ```
+</Accordion>
+
+## NoILS driver
+
+Use `NoILS` when you have no ILS, when your ILS is undergoing maintenance, or when you want to deploy VuFind with metadata-only functionality.
+
+```ini
+; config.ini
+[Catalog]
+driver = NoILS
+```
+
+```ini
+; local/config/vufind/NoILS.ini
+[settings]
+; ils-none    = VuFind has no ILS; patron services are unavailable
+; ils-offline = ILS is temporarily offline; some cached data may display
+mode = ils-offline
+
+; Hide the login link when no ILS patron services are available
+hideLogin = false
+
+; Holdings source
+; none   = do not show any holdings info
+; marc   = read holdings from MARC record fields (configure [MarcHoldings])
+; custom = use settings in [Holdings] section
+useHoldings = none
+
+; Item status source (same options as useHoldings)
+useStatus = none
+```
+
+<Tip>
+During ILS maintenance windows, set `driver = NoILS` and `mode = ils-offline` in your local configuration. You can also set `loadNoILSOnFailure = true` in `config.ini [Catalog]` to have VuFind fall back to `NoILS` automatically if the primary driver fails to initialize.
+</Tip>
+
+## MultiBackend driver
+
+`MultiBackend` lets you chain multiple ILS drivers together in a consortial environment. Each driver handles a subset of record IDs, identified by a prefix.
+
+```ini
+; config.ini
+[Catalog]
+driver = MultiBackend
+```
+
+```ini
+; local/config/vufind/MultiBackend.ini
+[Drivers]
+; prefix = DriverName
+inst1  = KohaRest
+inst2  = Folio
+default = NoILS      ; used when no prefix matches
+
+[Login]
+; Which driver handles patron authentication
+defaultDriver = inst1
+```
+
+Records from institution 1 would have IDs prefixed with `inst1.` (e.g., `inst1.12345`), and VuFind routes all ILS calls for those records to the `KohaRest` driver.
+
+## Testing drivers
+
+Two fake drivers are available for development and testing:
+
+<CardGroup cols={2}>
+  <Card title="Sample" icon="flask" href="#">
+    Fast fake driver returning bare-minimum data. Good for UI development when ILS connectivity is not required. Set `driver = Sample`.
+  </Card>
+  <Card title="Demo" icon="circle-play" href="#">
+    Simulates a full-featured ILS including holds, fines, and loans with realistic but synthetic data. Slower than Sample due to additional Solr queries. Set `driver = Demo`.
+  </Card>
+</CardGroup>
+
+<Warning>
+Never use `Sample` or `Demo` in a production environment. They return fabricated data that could mislead real users about item availability and their account status.
+</Warning>

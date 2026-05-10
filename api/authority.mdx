@@ -1,0 +1,306 @@
+---
+title: 'Authority API: Search and Retrieve Authority Records'
+description: 'Reference for GET /api/v1/authority/search and /api/v1/authority/record. Query the authority index for persons, corporate bodies, and subject headings.'
+---
+
+The authority API provides access to VuFind's authority index (`SolrAuth`), which contains controlled vocabulary records for persons, corporate bodies, geographic names, and subject headings. These endpoints share the same parameter structure as the bibliographic search and record endpoints, but operate against authority data rather than catalog records.
+
+## Endpoints
+
+```
+GET /api/v1/authority/search
+POST /api/v1/authority/search
+```
+
+```
+GET /api/v1/authority/record
+POST /api/v1/authority/record
+```
+
+<Note>
+  The authority API uses the same permission model as the bibliographic search and record endpoints. Access is governed by the `access.api.Search` and `access.api.Record` permissions respectively. See the [API overview](/api/overview) for details.
+</Note>
+
+## Search endpoint: `/api/v1/authority/search`
+
+Search the authority index for matching records. The behavior and available parameters mirror the [bibliographic search endpoint](/api/search).
+
+### Parameters
+
+<ParamField query="lookfor" type="string" default="">
+  The search query string. Leave empty to retrieve all authority records.
+</ParamField>
+
+<ParamField query="type" type="string">
+  The search handler to use against the authority index. Valid values depend on your VuFind authority search configuration. Defaults to the configured default handler.
+</ParamField>
+
+<ParamField query="sort" type="string">
+  Sort order for results. Valid values depend on your authority sort configuration.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number (1-indexed). Ignored when `resumptionToken` is provided.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Number of records per page. Must be between `0` and the configured maximum (default `100`).
+</ParamField>
+
+<ParamField query="facet[]" type="string[]">
+  Authority index facet fields to compute alongside results. Repeat the parameter for multiple facets.
+</ParamField>
+
+<ParamField query="filter[]" type="string[]">
+  Facet filters to narrow the result set. Use `fieldName:value` syntax.
+</ParamField>
+
+<ParamField query="field[]" type="string[]">
+  Authority record fields to include in the response. If omitted, the default fields (`id`, `title`, `institutions`) are returned. See [available authority fields](#available-authority-fields) below.
+</ParamField>
+
+<ParamField query="resumptionToken" type="string">
+  Token for cursor-based iteration over large result sets. Pass `*` to begin from the start. Pass the token returned in a previous response to fetch the next batch. At least one `field[]` value is required when using cursor mode.
+</ParamField>
+
+## Record endpoint: `/api/v1/authority/record`
+
+Retrieve one or more authority records by their unique identifiers.
+
+### Parameters
+
+<ParamField query="id" type="string | string[]" required>
+  The unique identifier(s) of the authority record(s) to retrieve.
+
+  - Single record: `?id=auth_12345`
+  - Multiple records: `?id[]=auth_12345&id[]=auth_67890`
+</ParamField>
+
+<ParamField query="field[]" type="string[]">
+  Authority record fields to include in the response. If omitted, the default fields are returned.
+</ParamField>
+
+<ParamField query="prettyPrint" type="boolean" default="false">
+  When `true`, formats the JSON response with indentation.
+</ParamField>
+
+<ParamField query="callback" type="string">
+  When provided, wraps the response in a JSONP callback with this function name.
+</ParamField>
+
+## Available authority fields
+
+The following fields can be requested via `field[]`. Fields marked as **default** are returned automatically when no `field[]` parameter is provided.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | yes | Record unique ID |
+| `title` | string | yes | Heading or name (title including any subtitle) |
+| `institutions` | string[] | yes | Institutions the record belongs to |
+| `fullrecord` | string | no | Full authority record |
+
+<Note>
+  The authority record field set is intentionally minimal in the default VuFind configuration. The `AuthorityApiRecordFields.yaml` file documents placeholders for additional string, keyword, and RDA fields that can be added by customizing the configuration.
+</Note>
+
+## Response structure
+
+Both endpoints return the same JSON envelope used by the bibliographic API.
+
+### Search response
+
+<ResponseField name="status" type="string" required>
+  `"OK"` on success, `"ERROR"` on failure.
+</ResponseField>
+
+<ResponseField name="resultCount" type="integer" required>
+  Total number of authority records matching the query.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  Array of authority record objects containing the requested fields.
+
+  <Expandable title="Authority record properties (default fields)">
+    <ResponseField name="id" type="string">
+      Authority record unique ID.
+    </ResponseField>
+    <ResponseField name="title" type="string">
+      The authorized form of the name or heading.
+    </ResponseField>
+    <ResponseField name="institutions" type="string[]">
+      Institutions the authority record belongs to. Useful for identifying the source or maintaining agency.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="facets" type="object">
+  Facet results keyed by field name. Present only when `facet[]` parameters were supplied.
+</ResponseField>
+
+<ResponseField name="resumptionToken" type="object">
+  Present only in cursor-based search responses.
+
+  <Expandable title="resumptionToken properties">
+    <ResponseField name="token" type="string">
+      Pass this value as `resumptionToken` in your next request.
+    </ResponseField>
+    <ResponseField name="expires" type="string">
+      Expiry timestamp in `YYYY-MM-DD HH:MM:SS` format.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Record response
+
+<ResponseField name="status" type="string" required>
+  `"OK"` on success, `"ERROR"` on failure.
+</ResponseField>
+
+<ResponseField name="resultCount" type="integer" required>
+  Number of records returned.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  Array of authority record objects containing the requested fields.
+</ResponseField>
+
+## Examples
+
+<Tabs>
+  <Tab title="Search authority records">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/authority/search?\
+lookfor=Darwin+Charles\
+&limit=5"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 3,
+      "records": [
+        {
+          "id": "auth_n79021383",
+          "title": "Darwin, Charles, 1809-1882",
+          "institutions": ["Library of Congress"]
+        },
+        {
+          "id": "auth_n85099083",
+          "title": "Darwin, Charles Galton, 1887-1962",
+          "institutions": ["Library of Congress"]
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Search with field selection">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/authority/search?\
+lookfor=Shakespeare\
+&field[]=id\
+&field[]=title\
+&field[]=fullrecord\
+&limit=2"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 7,
+      "records": [
+        {
+          "id": "auth_n78095332",
+          "title": "Shakespeare, William, 1564-1616",
+          "fullrecord": "<?xml version=\"1.0\"?><record>...</record>"
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Retrieve record by ID">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/authority/record?\
+id=auth_n79021383"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 1,
+      "records": [
+        {
+          "id": "auth_n79021383",
+          "title": "Darwin, Charles, 1809-1882",
+          "institutions": ["Library of Congress"]
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Retrieve multiple records">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/authority/record?\
+id[]=auth_n79021383\
+&id[]=auth_n78095332\
+&field[]=id\
+&field[]=title"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 2,
+      "records": [
+        {
+          "id": "auth_n79021383",
+          "title": "Darwin, Charles, 1809-1882"
+        },
+        {
+          "id": "auth_n78095332",
+          "title": "Shakespeare, William, 1564-1616"
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Cursor-based harvesting">
+    Harvest all authority records using cursor pagination:
+
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/authority/search?\
+resumptionToken=*\
+&field[]=id\
+&field[]=title"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 85000,
+      "records": [ ... ],
+      "resumptionToken": {
+        "token": "def456uvw",
+        "expires": "2026-05-11 14:00:00"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Error responses
+
+| Scenario | HTTP code | `statusMessage` |
+|---|---|---|
+| `id` parameter not provided on record endpoint | 400 | `"Missing id"` |
+| More than `maxLimit` IDs requested | 400 | `"Record limit (100) exceeded"` |
+| Record cannot be loaded | 400 | `"Error loading record"` |
+| Invalid `limit` value | 400 | `"Invalid limit"` |
+| Invalid search syntax | 400 | `"Invalid search"` |
+| Invalid or expired resumption token | 400 | `"Invalid or expired token"` |
+| No `field[]` provided with `resumptionToken` | 400 | `"Invalid record fields defined"` |
+| Permission denied | 403 | `"Permission denied"` |
+| API key required but not provided | 401 | _(key mode message)_ |
+
+<Tip>
+  Authority record IDs returned from the search endpoint can be used directly in the record endpoint to fetch full records. Store the `id` field in search results to enable efficient batch lookups.
+</Tip>

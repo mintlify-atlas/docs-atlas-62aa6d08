@@ -1,0 +1,466 @@
+---
+title: 'VuFind CLI Command Reference for Administrators'
+description: 'Complete reference for every Symfony Console command shipped with VuFind, grouped by category, with arguments, options, and example invocations.'
+---
+
+VuFind exposes its administrative functions through a set of Symfony Console commands registered in the `VuFindConsole` module. Every command is invoked through the PHP front controller:
+
+```bash
+php $VUFIND_HOME/public/index.php <command> [arguments] [options]
+```
+
+Running the entry point without arguments lists all available commands. Append `--help` to any command for its full argument and option documentation.
+
+```bash
+# List all commands
+php $VUFIND_HOME/public/index.php
+
+# Show help for a specific command
+php $VUFIND_HOME/public/index.php util/commit --help
+```
+
+<Note>
+Set `VUFIND_LOCAL_DIR` before running any command that reads configuration files. Without it, VuFind falls back to the base installation defaults and may ignore your local overrides.
+</Note>
+
+---
+
+## Import commands
+
+These commands index records from files into Solr without using the shell-level `import-marc.sh` script.
+
+<AccordionGroup>
+  <Accordion title="import/import-csv — CSV importer">
+    Imports records from a CSV file into Solr according to a CSV import configuration file.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php import/import-csv <csv-file> <config-file>
+    ```
+
+    **Arguments**
+
+    | Argument | Description |
+    |---|---|
+    | `csv-file` | Path to the CSV file to import |
+    | `config-file` | Path to the CSV import configuration (`.ini`) file |
+
+    **Options**
+
+    | Option | Description |
+    |---|---|
+    | `--test-only` | Perform a dry run without writing to Solr |
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php import/import-csv \
+        /data/new-records.csv \
+        $VUFIND_HOME/import/csv.ini
+    ```
+  </Accordion>
+
+  <Accordion title="import/import-xsl — XSLT importer">
+    Transforms XML metadata records using an XSLT stylesheet and indexes the result into Solr. Used for Dublin Core, OJS, DSpace DIM, and other XML formats.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php import/import-xsl <xml-file> <properties-file>
+    ```
+
+    **Arguments**
+
+    | Argument | Description |
+    |---|---|
+    | `xml-file` | Path to the XML source file |
+    | `properties-file` | Path to the import `.properties` file (e.g. `ojs.properties`) |
+
+    **Options**
+
+    | Option | Description |
+    |---|---|
+    | `--test-only` | Dry run; reports what would be indexed without writing to Solr |
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php import/import-xsl \
+        /data/ojs-records.xml \
+        $VUFIND_HOME/import/ojs.properties
+    ```
+
+    Pre-built properties files in `import/` include: `ojs.properties`, `dspace.properties`, `dspace-dim.properties`, `doaj.properties`, `ndltd.properties`, `gsdl.properties`, and others.
+  </Accordion>
+
+  <Accordion title="import/webcrawl — Web crawler importer">
+    Indexes web content collected by the built-in crawler into the `website` Solr core.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php import/webcrawl
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Harvest commands
+
+<AccordionGroup>
+  <Accordion title="harvest/harvest_oai — OAI-PMH harvester">
+    Harvests metadata records from OAI-PMH sources defined in `oai.ini` and writes the results to the harvest directory.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php harvest/harvest_oai [options]
+    ```
+
+    **Key options**
+
+    | Option | Description |
+    |---|---|
+    | `--ini` | Section name in `oai.ini` to harvest, or a path to an alternative `.ini` file |
+    | `--from` | Override the start date for incremental harvest (format: `YYYY-MM-DD`) |
+    | `--until` | Override the end date for incremental harvest |
+    | `--verbose` | Output detailed progress information |
+
+    **Example**
+
+    ```bash
+    # Harvest all sources
+    php $VUFIND_HOME/public/index.php harvest/harvest_oai
+
+    # Harvest one source
+    php $VUFIND_HOME/public/index.php harvest/harvest_oai --ini MyRepository
+
+    # Re-harvest a specific date range
+    php $VUFIND_HOME/public/index.php harvest/harvest_oai \
+        --ini MyRepository \
+        --from 2024-01-01 \
+        --until 2024-03-31
+    ```
+  </Accordion>
+
+  <Accordion title="harvest/merge-marc — MARC merge tool">
+    Merges multiple harvested MARC XML files into a single combined file. Useful when a repository returns one file per record and you need a single combined input for `import-marc.sh`.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php harvest/merge-marc <directory>
+    ```
+
+    **Arguments**
+
+    | Argument | Description |
+    |---|---|
+    | `directory` | Path to the directory containing the MARC XML files to merge |
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php harvest/merge-marc \
+        $VUFIND_LOCAL_DIR/harvest/MyRepository
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Language commands
+
+These commands help manage VuFind's language translation files.
+
+<AccordionGroup>
+  <Accordion title="language/normalize — Language file normalizer">
+    Sorts and standardises a language file or all files in a language directory, ensuring consistent key ordering and formatting.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/normalize <target>
+    ```
+
+    **Arguments**
+
+    | Argument | Description |
+    |---|---|
+    | `target` | Path to a single `.ini` language file, or to a directory of language files |
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/normalize \
+        $VUFIND_LOCAL_DIR/languages/de.ini
+    ```
+  </Accordion>
+
+  <Accordion title="language/copystring — String copier">
+    Copies a translation string from one language file to another, optionally across all installed language files.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/copystring <source> <target> <key>
+    ```
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/copystring en.ini de.ini my_custom_key
+    ```
+  </Accordion>
+
+  <Accordion title="language/delete — Delete string tool">
+    Removes a translation key from a language file or from all language files in a directory.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/delete <target> <key>
+    ```
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/delete \
+        $VUFIND_LOCAL_DIR/languages \
+        obsolete_key
+    ```
+  </Accordion>
+
+  <Accordion title="language/addusingtemplate — Template-based string builder">
+    Adds a new translation string to all language files by deriving a value from an existing string using a substitution template. Useful for creating variants of existing strings.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/addusingtemplate \
+        <source-key> <new-key> <template>
+    ```
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php language/addusingtemplate \
+        "Search Results" \
+        "Search Results for %%token%%" \
+        "Search Results for %%token%%"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Upgrade commands
+
+<AccordionGroup>
+  <Accordion title="upgrade/config — Configuration upgrader">
+    Migrates VuFind configuration files from an older version to the current version, merging local settings into the new defaults and reporting conflicts.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php upgrade/config [options]
+    ```
+
+    **Key options**
+
+    | Option | Description |
+    |---|---|
+    | `--from` | VuFind version of the old installation to migrate from |
+    | `--to` | Target VuFind version (defaults to installed version) |
+    | `--olddir` | Path to the old VuFind configuration directory |
+    | `--newdir` | Path to the destination local configuration directory |
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php upgrade/config \
+        --from 9.0 \
+        --olddir /old/vufind/local \
+        --newdir $VUFIND_LOCAL_DIR
+    ```
+  </Accordion>
+
+  <Accordion title="upgrade/database — Database upgrader">
+    Applies pending database migrations to bring the VuFind database schema up to the current version.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php upgrade/database [options]
+    ```
+
+    **Key options**
+
+    | Option | Description |
+    |---|---|
+    | `--no-interaction` | Run non-interactively; accept all defaults without prompting |
+
+    **Example**
+
+    ```bash
+    php $VUFIND_HOME/public/index.php upgrade/database --no-interaction
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Utility commands
+
+<AccordionGroup>
+  <Accordion title="util/commit — Solr commit tool">
+    Sends a commit request to Solr, making all indexed documents visible to searches.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/commit [core]
+    ```
+
+    Pass an optional core name argument to commit a specific core rather than the default `biblio`.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/commit authority
+    ```
+  </Accordion>
+
+  <Accordion title="util/optimize — Solr optimize tool">
+    Sends an optimize request to Solr, merging index segments for improved read performance.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/optimize [core]
+    ```
+
+    <Warning>
+    Optimization is an expensive, long-running operation. On large collections it can take hours and temporarily doubles disk usage. Schedule during low-traffic windows.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="util/deletes — Tool for deleting Solr records">
+    Removes a set of records from the Solr index.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/deletes <filename> <format>
+    ```
+
+    **Arguments**
+
+    | Argument | Description |
+    |---|---|
+    | `filename` | File containing records or IDs to delete |
+    | `format` | `flat` (one ID per line), `marc` (binary MARC, reads 001), or `filename` (SolrMarc delete format) |
+
+    **Example**
+
+    ```bash
+    # Delete by flat ID list
+    php $VUFIND_HOME/public/index.php util/deletes /data/deleted-ids.txt flat
+
+    # Delete from a MARC file
+    php $VUFIND_HOME/public/index.php util/deletes /data/deleted.mrc marc
+    ```
+  </Accordion>
+
+  <Accordion title="util/suppressed — Remove ILS-suppressed records from Solr">
+    Queries the ILS for records that have been suppressed and removes them from the Solr `biblio` index.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/suppressed [options]
+    ```
+
+    **Options**
+
+    | Option | Description |
+    |---|---|
+    | `--batchsize` | Number of IDs to process per Solr delete request (default: 1000) |
+  </Accordion>
+
+  <Accordion title="util/index_reserves — Course reserves index builder">
+    Populates the Solr `reserves` core with course reserve data from the ILS or a CSV file.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/index_reserves [options]
+    ```
+
+    **Options**
+
+    | Option | Description |
+    |---|---|
+    | `--csv` | Path to a CSV file to import instead of querying the ILS |
+    | `--delimiter` | Field delimiter for CSV input (default: `,`) |
+    | `--template` | Path to a CSV template file describing column mappings |
+  </Accordion>
+
+  <Accordion title="util/createHierarchyTrees — Cache populator for hierarchies">
+    Pre-builds hierarchy tree XML for all hierarchical records and stores it in the VuFind cache. Without this, trees are built on demand which can be slow for large collections.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/createHierarchyTrees [record-id]
+    ```
+
+    Pass an optional record ID to rebuild only a single tree:
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/createHierarchyTrees my.collection.001
+    ```
+  </Accordion>
+
+  <Accordion title="util/sitemap — XML sitemap generator">
+    Generates XML sitemaps from the Solr `biblio` index for submission to search engines.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/sitemap [options]
+    ```
+
+    **Options**
+
+    | Option | Description |
+    |---|---|
+    | `--baseurl` | Override the base URL set in `config.ini` |
+    | `--outputdir` | Directory to write sitemap files to |
+  </Accordion>
+
+  <Accordion title="util/lint_marc — MARC record linter">
+    Validates MARC records against MARC21 rules and reports structural or encoding errors without importing them.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/lint_marc <file>
+    ```
+  </Accordion>
+
+  <Accordion title="Expiry commands">
+    A family of commands purges expired rows from various database tables. Run them on a schedule to keep the database lean.
+
+    | Command | Description |
+    |---|---|
+    | `util/expire_access_tokens` | Remove expired OAuth access tokens |
+    | `util/expire_auth_hashes` | Remove expired authentication hashes |
+    | `util/expire_external_sessions` | Remove expired external session records |
+    | `util/expire_login_tokens` | Remove expired "remember me" login tokens |
+    | `util/expire_oai_resumption` | Remove expired OAI-PMH resumption tokens |
+    | `util/expire_searches` | Remove expired saved searches |
+    | `util/expire_sessions` | Remove expired user sessions |
+    | `util/expire_audit_events` | Remove old audit event log entries |
+
+    All expiry commands accept a `--lifespan` option (in days) to control how old records must be before deletion, and a `--batch-size` option.
+
+    ```bash
+    php $VUFIND_HOME/public/index.php util/expire_sessions --lifespan 30
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Common workflows
+
+### Nightly incremental import
+
+```bash
+# 1. Harvest new records
+php $VUFIND_HOME/public/index.php harvest/harvest_oai
+
+# 2. Import harvested MARC records
+$VUFIND_HOME/harvest/batch-import-marc.sh MyRepository
+
+# 3. Process any deletions
+$VUFIND_HOME/harvest/batch-delete.sh MyRepository
+
+# 4. Commit so new records become searchable
+php $VUFIND_HOME/public/index.php util/commit
+
+# 5. Rebuild alphabetic browse
+$VUFIND_HOME/index-alphabetic-browse.sh
+```
+
+### Purge expired database rows
+
+```bash
+php $VUFIND_HOME/public/index.php util/expire_sessions --lifespan 30
+php $VUFIND_HOME/public/index.php util/expire_searches --lifespan 30
+php $VUFIND_HOME/public/index.php util/expire_access_tokens
+php $VUFIND_HOME/public/index.php util/expire_login_tokens
+```

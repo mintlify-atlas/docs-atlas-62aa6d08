@@ -1,0 +1,316 @@
+---
+title: "Themes: Customize VuFind's Look and Feel"
+description: "Learn how VuFind's layered theme system works, explore the built-in themes, and build a custom theme that extends bootstrap5 or sandal5."
+---
+
+VuFind's theme system lets you control every visual aspect of your discovery portal — from colors and typography to page layout and template markup — without touching core files. Themes are organized as directories under `themes/` and can extend one another through a parent/child relationship, inheriting assets and templates while selectively overriding only what you need.
+
+## Built-in themes
+
+VuFind ships with three themes that form a hierarchy:
+
+<CardGroup cols={3}>
+  <Card title="root" icon="tree">
+    The base of the hierarchy. Sets up view helpers, template resolution, and the icon system. Never use this theme directly; it provides the infrastructure all other themes build on. Its `extends` key is `false`.
+  </Card>
+  <Card title="bootstrap5" icon="layer-group">
+    The primary HTML5 theme built on Bootstrap 5. It extends `root`, bundles jQuery, Popper, Bootstrap JS, Font Awesome 4.7, and the full VuFind JavaScript suite. Provides a complete but lightly styled interface.
+  </Card>
+  <Card title="sandal5" icon="palette">
+    The default theme shipped with VuFind. It extends `bootstrap5` and applies a "flat" design with additional SCSS to give the interface a more opinionated, polished look. Set as the default in `config.ini`.
+  </Card>
+</CardGroup>
+
+The inheritance chain is: **your theme → sandal5 → bootstrap5 → root**.
+
+## Setting the active theme
+
+Open `local/config/vufind/config.ini` (copy from `config/vufind/config.ini` if it does not exist yet) and locate the `[Site]` section:
+
+```ini config.ini
+[Site]
+; Available standard themes: bootstrap5, sandal5
+theme = sandal5
+```
+
+You can also configure a separate theme for the Admin module and expose alternate themes to end users via query parameter:
+
+```ini config.ini
+; Optional: different theme for the Admin module
+;admin_theme = sandal
+
+; Allow users to switch themes via ?ui=theme1
+;alternate_themes = theme1:myTheme1,theme2:myTheme2
+
+; Show a theme picker dropdown to users
+;selectable_themes = "standard:Standard Theme"
+```
+
+<Note>
+Changes to the `theme` setting take effect immediately; no cache flush is required unless you also have asset minification enabled.
+</Note>
+
+## Theme directory structure
+
+Each theme lives in its own subdirectory under `themes/`. The `bootstrap5` theme illustrates the full layout:
+
+<Tree>
+  <Tree.Folder name="themes/" defaultOpen>
+    <Tree.Folder name="bootstrap5/" defaultOpen>
+      <Tree.Folder name="css/" />
+      <Tree.Folder name="images/" />
+      <Tree.Folder name="js/" />
+      <Tree.Folder name="scss/" />
+      <Tree.Folder name="templates/" />
+      <Tree.Folder name="tools/" />
+      <Tree.File name="theme.config.php" />
+      <Tree.File name="package.json" />
+    </Tree.Folder>
+    <Tree.Folder name="sandal5/">
+      <Tree.Folder name="css/" />
+      <Tree.Folder name="images/" />
+      <Tree.Folder name="scss/" />
+      <Tree.File name="theme.config.php" />
+    </Tree.Folder>
+    <Tree.Folder name="root/">
+      <Tree.Folder name="assets/" />
+      <Tree.Folder name="css/" />
+      <Tree.Folder name="images/" />
+      <Tree.Folder name="templates/" />
+      <Tree.File name="theme.config.php" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
+
+| Directory | Purpose |
+|-----------|---------|
+| `css/` | Compiled CSS files (output of Grunt/Sass) |
+| `scss/` | SCSS source files; `compiled.scss` is the Grunt entry point |
+| `js/` | JavaScript files |
+| `images/` | Theme images and icons |
+| `templates/` | Laminas/Zend view scripts (`.phtml`) |
+| `theme.config.php` | Declares `extends`, CSS/JS assets, view helpers, icons |
+
+## The `theme.config.php` file
+
+Every theme must have a `theme.config.php` that returns a PHP array. At minimum it needs an `extends` key:
+
+```php theme.config.php
+<?php
+return [
+    'extends' => 'bootstrap5',
+];
+```
+
+The `sandal5` theme uses exactly this. The `bootstrap5` theme is more complete, registering CSS files, JS files with priority ordering, favicons, view helper aliases, and icon sets:
+
+```php theme.config.php
+<?php
+return [
+    'extends' => 'root',
+    'css' => [
+        ['file' => 'compiled.css'],
+        ['file' => 'print.css', 'media' => 'print'],
+    ],
+    'js' => [
+        ['file' => 'vendor/jquery.min.js', 'priority' => 110],
+        ['file' => 'vendor/bootstrap.min.js', 'priority' => 140],
+        ['file' => 'common.js', 'priority' => 310],
+        // ...
+    ],
+    'favicon' => 'vufind-favicon.ico',
+    'icons' => [
+        'defaultSet' => 'FontAwesome',
+        // ...
+    ],
+];
+```
+
+## Creating a custom theme
+
+<Steps>
+  <Step title="Create the theme directory">
+    Create a new directory under `themes/`. The `local_theme_example` directory in the VuFind source is a working reference you can copy:
+
+    ```bash
+    mkdir -p themes/mytheme/scss themes/mytheme/css themes/mytheme/images themes/mytheme/templates
+    ```
+  </Step>
+
+  <Step title="Write theme.config.php">
+    Declare which built-in theme your theme extends. Most custom themes extend `bootstrap5` directly to get full control, or extend `sandal5` to inherit its flat styling:
+
+    ```php themes/mytheme/theme.config.php
+    <?php
+    return [
+        'extends' => 'bootstrap5',
+    ];
+    ```
+  </Step>
+
+  <Step title="Create your SCSS entry point">
+    Grunt compiles any theme that has `scss/compiled.scss`. The `local_theme_example` pattern is to import a `custom.scss` that overrides Bootstrap variables before importing the parent theme's SCSS:
+
+    ```scss themes/mytheme/scss/custom.scss
+    /* Override Bootstrap variables before importing the base theme */
+    $primary: #0045a1;
+    $navbar-dark-color: white;
+
+    @import "bootstrap"; /* Pulls in bootstrap5 theme's SCSS base */
+
+    /* Add your own rules below */
+    body {
+      font-size: 14px;
+      color: #333;
+    }
+    ```
+
+    ```scss themes/mytheme/scss/compiled.scss
+    @import "custom";
+    ```
+
+    <Note>
+    The `@import "bootstrap"` in `custom.scss` resolves through the theme inheritance path that Grunt builds from `theme.config.php`. This prevents Bootstrap from being included twice in the final CSS.
+    </Note>
+  </Step>
+
+  <Step title="Compile SCSS with Grunt">
+    From the VuFind root directory, compile all themes' SCSS to CSS:
+
+    ```bash
+    grunt scss
+    ```
+
+    During active development, use the watch task to recompile automatically on file save:
+
+    ```bash
+    grunt watch:scss
+    ```
+
+    Grunt scans every `themes/*/scss/compiled.scss` and outputs a compiled `css/compiled.css` alongside it.
+  </Step>
+
+  <Step title="Activate your theme">
+    Add the theme name to your local `config.ini`:
+
+    ```ini local/config/vufind/config.ini
+    [Site]
+    theme = mytheme
+    ```
+  </Step>
+</Steps>
+
+## Overriding templates
+
+When VuFind resolves a template, it walks the theme inheritance chain from child to parent and uses the first match it finds. To override a template, copy it from the parent theme into your theme's `templates/` directory and modify it there.
+
+For example, to override the search results header:
+
+```bash
+cp themes/bootstrap5/templates/search/results.phtml themes/mytheme/templates/search/results.phtml
+```
+
+The `bootstrap5` theme provides 69 template subdirectories covering every part of the interface, from `admin/` and `auth/` to `search/`, `record/`, and `myresearch/`.
+
+<Warning>
+Keep overridden templates to a minimum. Each copied template becomes a maintenance burden because upstream bug fixes and new features in the parent template will not be inherited automatically.
+</Warning>
+
+## Asset compilation with Grunt
+
+VuFind uses [Grunt](https://gruntjs.com/) with `grunt-dart-sass` for SCSS compilation. The `Gruntfile.js` in the project root handles discovery and compilation of all themes automatically.
+
+<Tabs>
+  <Tab title="Install dependencies">
+    ```bash
+    cd themes/bootstrap5
+    npm install
+    cd ../..
+    npm install
+    ```
+  </Tab>
+  <Tab title="Compile SCSS">
+    ```bash
+    grunt scss
+    ```
+  </Tab>
+  <Tab title="Watch for changes">
+    ```bash
+    grunt watch:scss
+    ```
+  </Tab>
+  <Tab title="Validate SCSS">
+    ```bash
+    grunt check:scss
+    ```
+  </Tab>
+</Tabs>
+
+Grunt resolves SCSS `@import` paths by traversing the `extends` chain in `theme.config.php`, so imports like `@import "bootstrap"` automatically resolve to the correct parent theme file.
+
+## Asset pipeline (minification)
+
+VuFind supports optional asset concatenation and minification, configured in the `[Site]` section of `config.ini`:
+
+```ini config.ini
+; Enable JS minification in production, disable in development
+asset_pipeline = "development:off; production:js,css"
+```
+
+<Tip>
+Clear `local/cache/public/` after changing `asset_pipeline` settings so the new configuration takes effect.
+</Tip>
+
+## Using mixins
+
+In addition to the parent/child `extends` relationship, VuFind supports **mixins** — lightweight theme fragments that inject only JS or CSS. The `local_mixin_example` theme demonstrates this pattern with a `mixin.config.php` instead of `theme.config.php`:
+
+```php themes/local_mixin_example/mixin.config.php
+<?php
+return [
+    'js' => ['mixin-popup.js'],
+];
+```
+
+Reference a mixin from your theme's `theme.config.php` to include its assets alongside your own, without creating a full inheritance relationship.
+
+<AccordionGroup>
+  <Accordion title="Icon system">
+    The `bootstrap5` theme configures Font Awesome 4.7 as the default icon set and defines aliases for every icon used across VuFind. To override an icon in your theme, add an `icons` key to `theme.config.php` with only the aliases you want to change:
+
+    ```php themes/mytheme/theme.config.php
+    <?php
+    return [
+        'extends' => 'bootstrap5',
+        'icons' => [
+            'aliases' => [
+                'search' => 'FontAwesome:magnifying-glass',
+                'cart'   => 'FontAwesome:bag-shopping',
+            ],
+        ],
+    ];
+    ```
+  </Accordion>
+  <Accordion title="Sticky elements">
+    The `bootstrap5` theme supports configurable sticky page elements. Enable them in `theme.config.php` under `stickyElements`, for example to make the search bar sticky on non-mobile screens:
+
+    ```php themes/mytheme/theme.config.php
+    <?php
+    return [
+        'extends' => 'bootstrap5',
+        'stickyElements' => [
+            ['selector' => '.search.container.navbar'],
+        ],
+    ];
+    ```
+  </Accordion>
+  <Accordion title="Admin theme">
+    You can specify a separate theme for the Admin module so your institutional branding does not interfere with administrative pages:
+
+    ```ini local/config/vufind/config.ini
+    [Site]
+    theme       = mytheme
+    admin_theme = sandal5
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,300 @@
+---
+title: 'Records API: Retrieve Bibliographic Records by ID'
+description: 'How to fetch one or multiple bibliographic records by unique ID using GET /api/v1/record. Includes field selection, response structure, and curl examples.'
+---
+
+The record endpoint retrieves one or more bibliographic records by their unique identifiers. Use it when you already know the record ID — for example, from a previous search response — and need to fetch full or partial record data without performing a new search.
+
+## Endpoints
+
+```
+GET /api/v1/record
+POST /api/v1/record
+```
+
+Both GET and POST are supported. A single request can retrieve multiple records simultaneously by passing an array of IDs. The maximum number of records per request is `100` by default (configurable via `[API] maxLimit` in `searches.ini`).
+
+<Note>
+  Access to this endpoint requires the `access.api.Record` permission. On default installations this is open to all requests. See the [API overview](/api/overview) for authentication and permission details.
+</Note>
+
+## Parameters
+
+<ParamField query="id" type="string | string[]" required>
+  The unique identifier (or identifiers) of the record(s) to retrieve. Pass a single string for one record, or repeat the parameter as an array for multiple records.
+
+  - Single record: `?id=12345`
+  - Multiple records: `?id[]=12345&id[]=67890`
+</ParamField>
+
+<ParamField query="field[]" type="string[]">
+  List of record fields to include in the response. If omitted, only the default fields are returned. See [available record fields](#available-record-fields) below for the complete list.
+
+  Example: `?field[]=id&field[]=title&field[]=publishers&field[]=publicationDates`
+</ParamField>
+
+<ParamField query="prettyPrint" type="boolean" default="false">
+  When `true`, formats the JSON response with indentation.
+</ParamField>
+
+<ParamField query="callback" type="string">
+  When provided, wraps the response in a JSONP callback with this function name.
+</ParamField>
+
+## Available record fields
+
+The following fields can be requested via `field[]`. Fields marked as **default** are returned automatically when no `field[]` parameter is provided.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | yes | Record unique ID |
+| `title` | string | yes | Title including any subtitle |
+| `authors` | object | yes | Deduplicated authors grouped by role |
+| `formats` | string[] | yes | Format types (e.g., Book, Article) |
+| `languages` | string[] | yes | Languages of the record |
+| `series` | string[] | yes | Series names |
+| `subjects` | array of string[] | yes | Subject headings, least to most specific |
+| `urls` | object[] | yes | URLs contained in the record |
+| `accessRestrictions` | string[] | no | Access restriction notes |
+| `awards` | string[] | no | Award notes |
+| `bibliographicLevel` | string | no | Monograph, Serial, Collection, etc. |
+| `bibliographyNotes` | string[] | no | Bibliography notes |
+| `buildings` | string[] | no | Buildings where the record is held |
+| `callNumbers` | string[] | no | Call numbers |
+| `childRecordCount` | integer | no | Number of child records |
+| `cleanDoi` | string | no | First valid DOI |
+| `cleanIsbn` | string | no | First valid ISBN |
+| `cleanIssn` | string | no | Base portion of the first listed ISSN |
+| `cleanOclcNumber` | string | no | First OCLC number |
+| `containerEndPage` | string | no | End page in the containing item |
+| `containerIssue` | string | no | Issue number of the containing item |
+| `containerReference` | string | no | Reference to the containing item |
+| `containerStartPage` | string | no | Start page in the containing item |
+| `containerTitle` | string | no | Title of the containing item |
+| `containerVolume` | string | no | Volume of the containing item |
+| `corporateAuthors` | string[] | no | Main corporate authors |
+| `dedupIds` | string[] | no | IDs of deduplicated records |
+| `edition` | string | no | Edition statement |
+| `findingAids` | string[] | no | Finding aids |
+| `fullRecord` | string | no | Full metadata record (typically XML) |
+| `generalNotes` | string[] | no | General notes |
+| `geoLocations` | string[] | no | Geographic locations (points, bounding boxes) |
+| `hierarchicalPlaceNames` | string[] | no | Hierarchical place names for display |
+| `hierarchyParentId` | string[] | no | Parent record IDs (hierarchical records) |
+| `hierarchyParentTitle` | string[] | no | Parent record titles (hierarchical records) |
+| `hierarchyTopId` | string[] | no | Hierarchy top record IDs |
+| `hierarchyTopTitle` | string[] | no | Hierarchy top record titles |
+| `humanReadablePublicationDates` | string[] | no | Publication dates in human-readable format |
+| `institutions` | string[] | no | Institutions the record belongs to |
+| `isbns` | string[] | no | ISBNs |
+| `isCollection` | boolean | no | Whether the record is a collection node |
+| `issns` | string[] | no | ISSNs |
+| `lccn` | string[] | no | LCCNs |
+| `newerTitles` | string[] | no | Successor titles |
+| `oclc` | string[] | no | OCLC numbers |
+| `openUrl` | string | no | OpenURL |
+| `physicalDescriptions` | string[] | no | Physical dimensions etc. |
+| `placesOfPublication` | string[] | no | Places of publication |
+| `playingTimes` | string[] | no | Playing times (durations) |
+| `previousTitles` | string[] | no | Predecessor titles |
+| `primaryAuthors` | string[] | no | Primary authors |
+| `productionCredits` | string[] | no | Production credits |
+| `publicationDates` | string[] | no | Publication dates |
+| `publishers` | string[] | no | Publishers |
+| `rawData` | string | no | All data in the index fields |
+| `recordLinks` | object[] | no | Links to related records |
+| `recordPage` | string | no | Link to the record page in the UI |
+| `relationshipNotes` | string[] | no | Relationship notes |
+| `secondaryAuthors` | string[] | no | Secondary authors |
+| `shortTitle` | string | no | Title excluding subtitle |
+| `subjectsExtended` | object[] | no | Subject headings with type and source |
+| `subTitle` | string | no | Subtitle |
+| `summary` | string[] | no | Summary |
+| `systemDetails` | string[] | no | Technical details |
+| `targetAudienceNotes` | string[] | no | Target audience notes |
+| `titleSection` | string | no | Part/section portion of the title |
+| `titleStatement` | string | no | Statement of responsibility |
+| `toc` | string[] | no | Table of contents |
+
+## Response structure
+
+<ResponseField name="status" type="string" required>
+  `"OK"` on success, `"ERROR"` on failure.
+</ResponseField>
+
+<ResponseField name="resultCount" type="integer" required>
+  The number of records returned. This is the count of records found, which may be less than the number of IDs requested if some IDs are not found.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  Array of record objects. Each object contains the fields requested via `field[]` (or the default fields if none were specified). Absent if no matching records were found or no fields were requested.
+
+  <Expandable title="Record object properties (default fields)">
+    <ResponseField name="id" type="string">
+      Record unique ID.
+    </ResponseField>
+    <ResponseField name="title" type="string">
+      Title including any subtitle.
+    </ResponseField>
+    <ResponseField name="authors" type="object">
+      Authors grouped by role. Common keys include `primary`, `secondary`, and `corporate`. Each key maps to an object where keys are author names and values are arrays of role details.
+    </ResponseField>
+    <ResponseField name="formats" type="string[]">
+      Format types such as `"Book"`, `"Article"`, or `"Journal"`.
+    </ResponseField>
+    <ResponseField name="languages" type="string[]">
+      Languages of the resource.
+    </ResponseField>
+    <ResponseField name="series" type="string[]">
+      Series the record belongs to.
+    </ResponseField>
+    <ResponseField name="subjects" type="array">
+      Nested arrays of subject heading terms, ordered from least specific to most specific.
+    </ResponseField>
+    <ResponseField name="urls" type="object[]">
+      URLs contained in the record. Each entry has a `url` property and optionally a `desc` (description).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="statusMessage" type="string">
+  Human-readable error description. Present only when `status` is `"ERROR"`.
+</ResponseField>
+
+## Examples
+
+<Tabs>
+  <Tab title="Single record (default fields)">
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/record?id=12345"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 1,
+      "records": [
+        {
+          "id": "12345",
+          "title": "Introduction to Geology",
+          "authors": {
+            "primary": { "Smith, John": [] }
+          },
+          "formats": ["Book"],
+          "languages": ["English"],
+          "series": [],
+          "subjects": [
+            ["Science", "Earth Sciences", "Geology"]
+          ],
+          "urls": []
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Single record (selected fields)">
+    Request only specific fields to reduce response size:
+
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/record?\
+id=12345\
+&field[]=id\
+&field[]=title\
+&field[]=publishers\
+&field[]=publicationDates\
+&field[]=isbns\
+&field[]=callNumbers"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 1,
+      "records": [
+        {
+          "id": "12345",
+          "title": "Introduction to Geology",
+          "publishers": ["Oxford University Press"],
+          "publicationDates": ["2019"],
+          "isbns": ["9780198823544"],
+          "callNumbers": ["QE26.3 .S65 2019"]
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Multiple records">
+    Retrieve several records in a single request:
+
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/record?\
+id[]=12345\
+&id[]=67890\
+&id[]=11111\
+&field[]=id\
+&field[]=title\
+&field[]=formats"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 3,
+      "records": [
+        {
+          "id": "12345",
+          "title": "Introduction to Geology",
+          "formats": ["Book"]
+        },
+        {
+          "id": "67890",
+          "title": "Plate Tectonics: An Insider's History",
+          "formats": ["Book"]
+        },
+        {
+          "id": "11111",
+          "title": "Journal of Geophysical Research",
+          "formats": ["Journal"]
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Full record XML">
+    Retrieve the raw metadata record (typically MARC XML):
+
+    ```bash
+    curl "https://your-vufind-instance.example.org/api/v1/record?\
+id=12345\
+&field[]=id\
+&field[]=fullRecord"
+    ```
+
+    ```json
+    {
+      "status": "OK",
+      "resultCount": 1,
+      "records": [
+        {
+          "id": "12345",
+          "fullRecord": "<?xml version=\"1.0\"?><record>...</record>"
+        }
+      ]
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Error responses
+
+| Scenario | HTTP code | `statusMessage` |
+|---|---|---|
+| `id` parameter not provided | 400 | `"Missing id"` |
+| More than `maxLimit` IDs provided | 400 | `"Record limit (100) exceeded"` |
+| Record cannot be loaded | 400 | `"Error loading record"` |
+| Permission denied | 403 | `"Permission denied"` |
+| API key required but missing | 401 | _(key mode message)_ |
+
+<Tip>
+  The `id` values to use here come from the `id` field in search results. Including `field[]=id` in your search requests ensures you always have the identifiers needed for subsequent record lookups.
+</Tip>
